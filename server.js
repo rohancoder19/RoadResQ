@@ -1,0 +1,1017 @@
+require('dotenv').config();
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const path = require('path');
+const nodemailer = require('nodemailer');
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+const PORT = process.env.PORT || 3000;
+
+// Gemini API Key for Emergency Chatbot
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+
+// ========================================================
+// Email & OTP Utility Setup
+// ========================================================
+const pendingOTPs = new Map(); // email (lowercase) -> { otp, expiresAt, resendAvailableAt }
+
+let mailTransporter = null;
+
+// Initialize mail transporter
+async function initMailTransporter() {
+  if (process.env.SMTP_HOST) {
+    console.log('[Email] Configuring SMTP Transporter with environment variables...');
+    mailTransporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || '587'),
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+      }
+    });
+  } else {
+    console.log('[Email] No SMTP environment variables found. Attempting Ethereal Mail setup...');
+    try {
+      const testAccount = await nodemailer.createTestAccount();
+      console.log(`[Email] Ethereal Mail Test Account generated: User: ${testAccount.user}`);
+      mailTransporter = nodemailer.createTransport({
+        host: testAccount.smtp.host,
+        port: testAccount.smtp.port,
+        secure: testAccount.smtp.secure,
+        auth: {
+          user: testAccount.user,
+          pass: testAccount.pass
+        }
+      });
+    } catch (err) {
+      console.error('[Email] Failed to create Ethereal Mail test account. Falling back to console-only logging.', err.message);
+    }
+  }
+}
+initMailTransporter();
+
+// HTML Email Templates
+function getWelcomeEmailHtml(name, role, phone) {
+  return `
+    <div style="font-family: 'Outfit', 'Inter', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff;">
+      <div style="text-align: center; border-bottom: 1px solid #f1f5f9; padding-bottom: 20px; margin-bottom: 20px;">
+        <h2 style="color: #1e3a8a; margin: 0; font-size: 24px; text-transform: uppercase; letter-spacing: 1px;">RoadsideRescue</h2>
+        <p style="color: #64748b; font-size: 12px; margin: 5px 0 0 0;">Active Status Hub & Assistance Portal</p>
+      </div>
+      <div style="padding: 10px 0;">
+        <h3 style="color: #0f172a; margin-top: 0; font-size: 18px;">Welcome, ${name}!</h3>
+        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+          Thank you for signing up for RoadsideRescue. Your account has been successfully created with the following details:
+        </p>
+        <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 15px; margin: 20px 0;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+            <tr>
+              <td style="padding: 6px 0; color: #64748b; font-weight: 600; width: 35%;">Account Role:</td>
+              <td style="padding: 6px 0; color: #1e3a8a; font-weight: 700; text-transform: capitalize;">${role}</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 0; color: #64748b; font-weight: 600;">Phone Number:</td>
+              <td style="padding: 6px 0; color: #0f172a; font-weight: 700;">${phone}</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 0; color: #64748b; font-weight: 600;">Status:</td>
+              <td style="padding: 6px 0; color: #10b981; font-weight: 700;">Verified & Active</td>
+            </tr>
+          </table>
+        </div>
+        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+          You can now log in to your dashboard to either request help in an emergency (if you are a Customer) or receive breakdown alerts nearby (if you are a Mechanic).
+        </p>
+        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+          Please remember to keep your GPS location services enabled for real-time tracking during dispatch operations.
+        </p>
+      </div>
+      <div style="text-align: center; border-top: 1px solid #f1f5f9; padding-top: 20px; margin-top: 30px; font-size: 11px; color: #94a3b8; line-height: 1.4;">
+        This email was sent by RoadsideRescue Security. If you did not create this account, please ignore this email or contact support.
+        <br>&copy; 2026 RoadsideRescue. All rights reserved.
+      </div>
+    </div>
+  `;
+}
+
+function getOTPEmailHtml(name, otp) {
+  return `
+    <div style="font-family: 'Outfit', 'Inter', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff;">
+      <div style="text-align: center; border-bottom: 1px solid #f1f5f9; padding-bottom: 20px; margin-bottom: 20px;">
+        <h2 style="color: #1e3a8a; margin: 0; font-size: 24px; text-transform: uppercase; letter-spacing: 1px;">RoadsideRescue</h2>
+        <p style="color: #64748b; font-size: 12px; margin: 5px 0 0 0;">Active Status Hub & Assistance Portal</p>
+      </div>
+      <div style="padding: 10px 0; text-align: center;">
+        <h3 style="color: #0f172a; margin-top: 0; font-size: 18px; text-align: left;">Security Verification</h3>
+        <p style="color: #334155; font-size: 14px; line-height: 1.6; text-align: left;">
+          Hello ${name},
+        </p>
+        <p style="color: #334155; font-size: 14px; line-height: 1.6; text-align: left;">
+          To complete your login and access your RoadsideRescue dashboard, please use the following one-time passcode (OTP):
+        </p>
+        
+        <div style="margin: 30px 0; padding: 20px; background-color: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 16px; display: inline-block;">
+          <span style="font-family: monospace; font-size: 36px; font-weight: 700; color: #f97316; letter-spacing: 6px;">${otp}</span>
+        </div>
+        
+        <p style="color: #ef4444; font-size: 12px; font-weight: 600; margin-bottom: 20px; text-align: left;">
+          ⚠️ This passcode is valid for 5 minutes. Do not share this code with anyone, including RoadsideRescue agents.
+        </p>
+        
+        <div style="background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 15px; text-align: left; margin-top: 20px;">
+          <h4 style="color: #1e3a8a; margin: 0 0 5px 0; font-size: 13px; font-weight: 700;">Safety Tips:</h4>
+          <ul style="color: #1e40af; font-size: 12px; margin: 0; padding-left: 20px; line-height: 1.5;">
+            <li>Always confirm the mechanic's details (name and vehicle type) on your dashboard before getting into or allowing access to a vehicle.</li>
+            <li>Use the SOS Share button in your dashboard to send your live location coordinates to family or emergency contacts if you feel unsafe.</li>
+            <li>If you are stranded on a highway, stay behind the safety barrier at all times.</li>
+          </ul>
+        </div>
+      </div>
+      <div style="text-align: center; border-top: 1px solid #f1f5f9; padding-top: 20px; margin-top: 30px; font-size: 11px; color: #94a3b8; line-height: 1.4;">
+        This email was sent by RoadsideRescue Security. If you did not request this login code, please reset your password immediately.
+        <br>&copy; 2026 RoadsideRescue. All rights reserved.
+      </div>
+    </div>
+  `;
+}
+
+// Mail Sending Wrapper
+async function sendMail({ to, subject, html, text }) {
+  const fromName = 'RoadsideRescue Security';
+  const fromEmail = process.env.SMTP_FROM || 'security@roadresq.com';
+  
+  console.log(`\n====================================================`);
+  console.log(`[OUTGOING EMAIL]`);
+  console.log(`To:      ${to}`);
+  console.log(`Subject: ${subject}`);
+  console.log(`Body (Text preview): ${text}`);
+  console.log(`====================================================\n`);
+
+  if (!mailTransporter) {
+    console.log('[Email] Transporter not ready or disabled. Email logged to console.');
+    return { success: true, loggedToConsole: true };
+  }
+
+  try {
+    const info = await mailTransporter.sendMail({
+      from: `"${fromName}" <${fromEmail}>`,
+      to,
+      subject,
+      text,
+      html
+    });
+
+    console.log(`[Email] Mail sent successfully. Message ID: ${info.messageId}`);
+    
+    const previewUrl = nodemailer.getTestMessageUrl(info);
+    if (previewUrl) {
+      console.log(`[Email] Preview sent email at: ${previewUrl}`);
+      return { success: true, previewUrl };
+    }
+    return { success: true };
+  } catch (error) {
+    console.error('[Email] Failed to send email via transporter:', error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+// Enable JSON body parsing for REST routes
+app.use(express.json());
+
+// Serve static files from 'public' directory
+app.use(express.static(path.join(__dirname, 'public')));
+
+// In-memory mock database
+const registeredUsers = new Map(); // email (lowercase) -> UserObject { name, email, password, role, phone }
+const activeRequests = new Map(); // requestId -> RequestObject
+const onlineMechanics = new Map(); // socketId -> MechanicObject
+const connectedUsers = new Map(); // socketId -> UserSessionObject { name, email, role, phone, socketId, location }
+
+// Seed mock accounts with phone numbers
+registeredUsers.set('customer@resq.com', {
+  name: 'Alice Customer',
+  email: 'customer@resq.com',
+  password: 'password123',
+  phone: '+1 (555) 019-2834',
+  role: 'customer'
+});
+registeredUsers.set('mechanic@resq.com', {
+  name: 'Bob Mechanic',
+  email: 'mechanic@resq.com',
+  password: 'password123',
+  phone: '+1 (555) 014-9988',
+  role: 'mechanic'
+});
+
+// Helper: Haversine formula to calculate distance in km
+function getDistance(lat1, lon1, lat2, lon2) {
+  if (lat1 === undefined || lon1 === undefined || lat2 === undefined || lon2 === undefined) return null;
+  const R = 6371; // Radius of the Earth in km
+  const dLat = deg2rad(lat2 - lat1);
+  const dLon = deg2rad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const d = R * c; // Distance in km
+  return d;
+}
+
+function deg2rad(deg) {
+  return deg * (Math.PI / 180);
+}
+
+// Helper: Get nearby mechanics for a specific location
+function getNearbyMechanics(location, radiusKm = 50) {
+  const nearbyMechs = [];
+  onlineMechanics.forEach((mech) => {
+    if (mech.status === 'available' && mech.location) {
+      const distance = getDistance(location.lat, location.lng, mech.location.lat, mech.location.lng);
+      if (distance !== null && distance <= radiusKm) {
+        nearbyMechs.push({
+          socketId: mech.socketId,
+          name: mech.name,
+          phone: mech.phone || 'Not Provided',
+          location: mech.location,
+          status: mech.status,
+          distance: distance
+        });
+      }
+    }
+  });
+  return nearbyMechs;
+}
+
+// Helper: Broadcast online/active mechanics list to all connected customers
+function broadcastOnlineMechanics() {
+  connectedUsers.forEach((user, socketId) => {
+    if (user.role === 'customer') {
+      if (user.location) {
+        const nearbyMechs = getNearbyMechanics(user.location);
+        io.to(socketId).emit('nearby_mechanics_list', nearbyMechs);
+      } else {
+        io.to(socketId).emit('nearby_mechanics_list', []);
+      }
+    }
+  });
+}
+
+// ========================================================
+// REST API Endpoints
+// ========================================================
+
+// 1. User Registration
+app.post('/api/register', (req, res) => {
+  const { name, email, password, role, phone } = req.body;
+  
+  if (!name || !email || !password || !role || !phone) {
+    return res.status(400).json({ error: 'All registration fields (including phone) are required.' });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  if (registeredUsers.has(normalizedEmail)) {
+    return res.status(400).json({ error: 'An account with this email already exists.' });
+  }
+
+  if (role !== 'customer' && role !== 'mechanic') {
+    return res.status(400).json({ error: 'Invalid user role selected.' });
+  }
+
+  const newUser = {
+    name: name.trim(),
+    email: normalizedEmail,
+    password, // Stored as plain text for simple prototype
+    role,
+    phone: phone.trim()
+  };
+
+  registeredUsers.set(normalizedEmail, newUser);
+  console.log(`[User Registered] Name: ${newUser.name}, Email: ${newUser.email}, Phone: ${newUser.phone}, Role: ${newUser.role}`);
+  
+  // Send welcome email asynchronously
+  sendMail({
+    to: newUser.email,
+    subject: 'Welcome to RoadsideRescue!',
+    text: `Hello ${newUser.name}, welcome to RoadsideRescue! Your account has been registered as a ${newUser.role}. Please enable location services to use the portal.`,
+    html: getWelcomeEmailHtml(newUser.name, newUser.role, newUser.phone)
+  }).catch(err => {
+    console.error(`[Email Error] Failed to send welcome email to ${newUser.email}:`, err.message);
+  });
+  
+  return res.status(201).json({
+    message: 'Registration successful!',
+    user: { name: newUser.name, email: newUser.email, role: newUser.role }
+  });
+});
+
+// 2. User Login
+app.post('/api/login', async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required.' });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const user = registeredUsers.get(normalizedEmail);
+
+  if (!user || user.password !== password) {
+    return res.status(401).json({ error: 'Invalid email or password credentials.' });
+  }
+
+  console.log(`[Login Attempt] Credentials verified for Name: ${user.name}, Email: ${user.email}`);
+
+  // Generate 6-digit OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
+  const resendAvailableAt = Date.now() + 30 * 1000; // 30 seconds resend cooldown
+
+  pendingOTPs.set(normalizedEmail, { otp, expiresAt, resendAvailableAt });
+
+  console.log(`[OTP Generated] Email: ${normalizedEmail}, OTP: ${otp} (Expires: 5m, Resend Cooldown: 30s)`);
+
+  // Send OTP email
+  let mailResult = null;
+  try {
+    mailResult = await sendMail({
+      to: user.email,
+      subject: `Your RoadsideRescue Login Code: ${otp}`,
+      text: `Hello ${user.name}, your security verification passcode is ${otp}. It will expire in 5 minutes.`,
+      html: getOTPEmailHtml(user.name, otp)
+    });
+  } catch (err) {
+    console.error(`[Email Error] Failed to send login OTP to ${user.email}:`, err.message);
+  }
+
+  const responseData = {
+    status: 'otp_sent',
+    message: 'Verification passcode sent to your registered email address.',
+    email: normalizedEmail
+  };
+
+  // Expose OTP and mock preview link in local dev/demo mode
+  if (!process.env.SMTP_HOST) {
+    responseData.otp = otp;
+    if (mailResult && mailResult.previewUrl) {
+      responseData.previewUrl = mailResult.previewUrl;
+    }
+  }
+
+  return res.json(responseData);
+});
+
+// 2a. Verify OTP
+app.post('/api/verify-otp', (req, res) => {
+  const { email, otp } = req.body;
+
+  if (!email || !otp) {
+    return res.status(400).json({ error: 'Email and OTP code are required.' });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const cachedOtpData = pendingOTPs.get(normalizedEmail);
+
+  if (!cachedOtpData) {
+    return res.status(400).json({ error: 'No active OTP verification session found. Please request a new code.' });
+  }
+
+  if (Date.now() > cachedOtpData.expiresAt) {
+    pendingOTPs.delete(normalizedEmail);
+    return res.status(400).json({ error: 'Passcode expired. Please request a new code.' });
+  }
+
+  if (cachedOtpData.otp !== otp.trim()) {
+    return res.status(400).json({ error: 'Invalid verification passcode.' });
+  }
+
+  // OTP is correct! Fetch the registered user data
+  const user = registeredUsers.get(normalizedEmail);
+  if (!user) {
+    return res.status(404).json({ error: 'User account not found.' });
+  }
+
+  // Remove the OTP from cache
+  pendingOTPs.delete(normalizedEmail);
+
+  console.log(`[OTP Verified] Successful login for: ${user.name} (${user.email})`);
+
+  return res.json({
+    message: 'OTP verification successful!',
+    user: { name: user.name, email: user.email, role: user.role, phone: user.phone }
+  });
+});
+
+// 2b. Resend OTP
+app.post('/api/resend-otp', async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ error: 'Email address is required.' });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const user = registeredUsers.get(normalizedEmail);
+
+  if (!user) {
+    return res.status(404).json({ error: 'User account not found.' });
+  }
+
+  const cachedOtpData = pendingOTPs.get(normalizedEmail);
+  if (cachedOtpData && Date.now() < cachedOtpData.resendAvailableAt) {
+    const waitTimeSec = Math.ceil((cachedOtpData.resendAvailableAt - Date.now()) / 1000);
+    return res.status(429).json({ error: `Please wait ${waitTimeSec} seconds before requesting a new code.` });
+  }
+
+  // Generate new OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
+  const resendAvailableAt = Date.now() + 30 * 1000; // 30 seconds cooldown
+
+  pendingOTPs.set(normalizedEmail, { otp, expiresAt, resendAvailableAt });
+
+  console.log(`[OTP Resent] Email: ${normalizedEmail}, OTP: ${otp}`);
+
+  // Send new OTP email
+  let mailResult = null;
+  try {
+    mailResult = await sendMail({
+      to: user.email,
+      subject: `Your New RoadsideRescue Login Code: ${otp}`,
+      text: `Hello ${user.name}, your new security verification passcode is ${otp}. It will expire in 5 minutes.`,
+      html: getOTPEmailHtml(user.name, otp)
+    });
+  } catch (err) {
+    console.error(`[Email Error] Failed to resend login OTP to ${user.email}:`, err.message);
+  }
+
+  const responseData = {
+    message: 'A new security passcode has been sent to your email.'
+  };
+
+  // Expose OTP and mock preview link in local dev/demo mode
+  if (!process.env.SMTP_HOST) {
+    responseData.otp = otp;
+    if (mailResult && mailResult.previewUrl) {
+      responseData.previewUrl = mailResult.previewUrl;
+    }
+  }
+
+  return res.json(responseData);
+});
+
+// 3. Gemini Chatbot Proxy Endpoint
+app.post('/api/chatbot', async (req, res) => {
+  const { message } = req.body;
+  if (!message) {
+    return res.status(400).json({ error: 'Message is required' });
+  }
+
+  const systemPrompt = "You are RescueAssistant, a helpful emergency assistant for RoadsideRescue. Your goal is to guide drivers who are stranded or experiencing vehicle issues safely. Provide clear, short, step-by-step instructions. Keep safety first. Keep responses brief, friendly, and formatted with bullet points for readability. If the driver is on a highway/high-speed road, remind them to stay behind the barrier.";
+
+  const payload = {
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            text: `${systemPrompt}\n\nUser Question: ${message}`
+          }
+        ]
+      }
+    ]
+  };
+
+  try {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`Gemini API error: ${response.status} - ${errText}`);
+      return res.status(response.status).json({ error: `Gemini API returned status ${response.status}` });
+    }
+
+    const data = await response.json();
+    if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts[0]) {
+      return res.json({ text: data.candidates[0].content.parts[0].text });
+    }
+    return res.json({ text: "I received your question but couldn't construct a safety recommendation. Please stay safe and contact emergency services if needed." });
+  } catch (error) {
+    console.error("Gemini API proxy error:", error);
+    return res.status(500).json({ error: "Failed to connect to the AI model." });
+  }
+});
+
+// 4. Configuration Endpoint
+app.get('/api/config', (req, res) => {
+  return res.json({
+    googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY || ''
+  });
+});
+
+
+
+// ========================================================
+// Socket.io Real-Time Communications
+// ========================================================
+io.on('connection', (socket) => {
+  console.log(`[Socket Connected] ID: ${socket.id}`);
+
+  // 1. Register Socket Session (After client logs in)
+  socket.on('register_user', (data) => {
+    const { name, role, email } = data;
+    const normalizedEmail = email ? email.trim().toLowerCase() : '';
+    const regUser = registeredUsers.get(normalizedEmail);
+    const phone = regUser ? regUser.phone : 'Not Provided';
+
+    const user = {
+      socketId: socket.id,
+      name: name || 'Anonymous',
+      email: normalizedEmail,
+      role: role || 'customer',
+      phone: phone,
+      location: null
+    };
+    connectedUsers.set(socket.id, user);
+    console.log(`[Socket Registered] ${user.name} (${user.role}) joined.`);
+
+    // Join isolated room based on role
+    if (user.role === 'customer') {
+      socket.join(`customer_${normalizedEmail}`);
+      console.log(`[Room Segregation] Customer socket ${socket.id} joined private room customer_${normalizedEmail}`);
+    }
+
+    // If role is mechanic, add to online list
+    if (role === 'mechanic') {
+      onlineMechanics.set(socket.id, {
+        socketId: socket.id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        location: null,
+        status: 'offline' // 'offline', 'available', 'busy'
+      });
+    }
+
+    socket.emit('register_success', { socketId: socket.id });
+
+    // --- SESSION RECOVERY LOGIC ---
+    if (user.role === 'customer') {
+      // Find if this customer has an active request in progress
+      let activeReq = null;
+      activeRequests.forEach((req) => {
+        if (req.customerEmail === normalizedEmail && (req.status === 'pending' || req.status === 'accepted')) {
+          activeReq = req;
+        }
+      });
+
+      if (activeReq) {
+        console.log(`[Session Recovery] Restoring active request ${activeReq.id} for Customer: ${user.name}`);
+        activeReq.customerSocketId = socket.id;
+        socket.emit('active_request_restored', activeReq);
+      }
+    } else if (user.role === 'mechanic') {
+      // Find if this mechanic was busy with an active job
+      let activeJob = null;
+      activeRequests.forEach((req) => {
+        if (req.mechanicEmail === normalizedEmail && req.status === 'accepted') {
+          activeJob = req;
+        }
+      });
+
+      if (activeJob) {
+        console.log(`[Session Recovery] Restoring active job ${activeJob.id} for Mechanic: ${user.name}`);
+        activeJob.mechanicSocketId = socket.id;
+        
+        const mech = onlineMechanics.get(socket.id);
+        if (mech) {
+          mech.status = 'busy';
+          mech.location = activeJob.mechanicLocation;
+        }
+        socket.leave("mechanics_room"); // Ensure busy mechanic is not in available room
+        socket.emit('active_job_restored', activeJob);
+      }
+    }
+
+    // Send latest mechanics list to this user if they are a customer
+    if (user.role === 'customer') {
+      if (user.location) {
+        const nearbyMechs = getNearbyMechanics(user.location);
+        socket.emit('nearby_mechanics_list', nearbyMechs);
+      } else {
+        socket.emit('nearby_mechanics_list', []);
+      }
+    }
+  });
+
+  // 2. Update Location
+  socket.on('update_location', (location) => {
+    if (!location || typeof location.lat !== 'number' || typeof location.lng !== 'number') return;
+
+    const user = connectedUsers.get(socket.id);
+    if (!user) return;
+
+    user.location = location;
+    
+    // If mechanic is online, update their location
+    if (user.role === 'mechanic') {
+      const mechanic = onlineMechanics.get(socket.id);
+      if (mechanic) {
+        mechanic.location = location;
+        
+        // Notify customers of the moving mechanic marker
+        broadcastOnlineMechanics();
+        
+        // If mechanic is busy, find their active request and notify customer of the updated location
+        if (mechanic.status === 'busy') {
+          for (const [reqId, req] of activeRequests.entries()) {
+            if (req.mechanicSocketId === socket.id && req.status === 'accepted') {
+              req.mechanicLocation = location;
+              io.to(`customer_${req.customerEmail}`).emit('mechanic_location_updated', location);
+              break;
+            }
+          }
+        }
+      }
+    } else {
+      // If customer has an active request, update the request location
+      for (const [reqId, req] of activeRequests.entries()) {
+        if (req.customerSocketId === socket.id && (req.status === 'pending' || req.status === 'accepted')) {
+          req.location = location;
+          // If accepted, notify the mechanic of the customer's moving location
+          if (req.status === 'accepted' && req.mechanicSocketId) {
+            io.to(req.mechanicSocketId).emit('customer_location_updated', location);
+          }
+          break;
+        }
+      }
+      
+      const nearbyMechs = getNearbyMechanics(location);
+      socket.emit('nearby_mechanics_list', nearbyMechs);
+    }
+  });
+
+  socket.on('get_nearby_mechanics', (location) => {
+    if (!location || typeof location.lat !== 'number' || typeof location.lng !== 'number') return;
+    const nearbyMechs = getNearbyMechanics(location);
+    socket.emit('nearby_mechanics_list', nearbyMechs);
+  });
+
+  // 3. Toggle Mechanic Status (Online/Offline)
+  socket.on('toggle_mechanic_status', (data) => {
+    const { isOnline } = data;
+    const mechanic = onlineMechanics.get(socket.id);
+    if (!mechanic) return;
+
+    if (mechanic.status === 'busy') {
+      // If busy, do not override status (e.g. on socket reconnect sync)
+      return;
+    }
+
+    mechanic.status = isOnline ? 'available' : 'offline';
+    console.log(`[Mechanic Status Toggle] ${mechanic.name} is now ${mechanic.status}`);
+
+    if (mechanic.status === 'available') {
+      socket.join("mechanics_room");
+      console.log(`[Room Segregation] Mechanic socket ${socket.id} joined mechanics_room`);
+    } else {
+      socket.leave("mechanics_room");
+      console.log(`[Room Segregation] Mechanic socket ${socket.id} left mechanics_room`);
+    }
+
+    socket.emit('mechanic_status_updated', { status: mechanic.status });
+
+    // Update list for customers
+    broadcastOnlineMechanics();
+
+    // If mechanic just went online, send them all currently pending requests
+    if (mechanic.status === 'available') {
+      const pendingJobs = [];
+      activeRequests.forEach((req, id) => {
+        if (req.status === 'pending') {
+          let distance = null;
+          if (mechanic.location && req.location) {
+            distance = getDistance(mechanic.location.lat, mechanic.location.lng, req.location.lat, req.location.lng);
+          }
+          pendingJobs.push({ ...req, distance });
+        }
+      });
+      socket.emit('available_jobs', pendingJobs);
+    }
+  });
+
+  // 4. Request Help (Customer Flow)
+  socket.on('request_help', (data) => {
+    const { vehicleType, description, location } = data;
+    const customer = connectedUsers.get(socket.id);
+    if (!customer) return;
+
+    // Check if user already has a pending or active request
+    let existingRequest = null;
+    activeRequests.forEach((req) => {
+      if ((req.customerSocketId === socket.id || (customer.email && req.customerEmail === customer.email)) && (req.status === 'pending' || req.status === 'accepted')) {
+        existingRequest = req;
+      }
+    });
+
+    if (existingRequest) {
+      socket.emit('request_error', { message: 'You already have an active help request!' });
+      return;
+    }
+
+    const requestId = 'REQ_' + Math.random().toString(36).substr(2, 9).toUpperCase();
+    const newRequest = {
+      id: requestId,
+      customerSocketId: socket.id,
+      customerName: customer.name,
+      customerEmail: customer.email,
+      vehicleType: vehicleType || 'Car',
+      description: description || 'Roadside Emergency',
+      location: location || customer.location,
+      status: 'pending',
+      timestamp: Date.now()
+    };
+
+    activeRequests.set(requestId, newRequest);
+    console.log(`[Help Request Created] ID: ${requestId} by Customer: ${customer.name}`);
+
+    // Broadcast request ONLY to the mechanics room (fully isolated)
+    io.to("mechanics_room").emit("new_breakdown_request", newRequest);
+
+    // Confirm request creation back to the customer's isolated room
+    io.to(`customer_${customer.email}`).emit('request_created', newRequest);
+  });
+
+  // 5. Accept Job (Mechanic Flow)
+  socket.on('accept_job', (data) => {
+    const { requestId } = data;
+    const mechanic = onlineMechanics.get(socket.id);
+    if (!mechanic || mechanic.status !== 'available') {
+      socket.emit('accept_error', { message: 'You are not available to accept jobs.' });
+      return;
+    }
+
+    const request = activeRequests.get(requestId);
+    if (!request) {
+      socket.emit('accept_error', { message: 'Request not found.' });
+      return;
+    }
+
+    if (request.status !== 'pending') {
+      socket.emit('accept_error', { message: 'This job has already been taken by another mechanic.' });
+      return;
+    }
+
+    // Assign job to this mechanic
+    request.status = 'accepted';
+    request.mechanicSocketId = socket.id;
+    request.mechanicName = mechanic.name;
+    request.mechanicEmail = mechanic.email;
+    request.mechanicLocation = mechanic.location;
+    
+    mechanic.status = 'busy';
+    socket.leave("mechanics_room"); // No longer available for other requests
+
+    console.log(`[Job Accepted] Request ID: ${requestId} by Mechanic: ${mechanic.name}`);
+
+    // Update availability list for customers
+    broadcastOnlineMechanics();
+
+    // Notify customer on their private isolated channel
+    io.to(`customer_${request.customerEmail}`).emit('mechanic_assigned', {
+      requestId: request.id,
+      mechanicName: mechanic.name,
+      mechanicPhone: mechanic.phone || 'Not Provided',
+      mechanicLocation: mechanic.location,
+      mechanicSocketId: socket.id
+    });
+
+    // Notify this mechanic of successful assignment
+    socket.emit('job_assigned', request);
+
+    // Broadcast to other mechanics that the job is taken/no longer pending
+    io.to("mechanics_room").emit('job_taken', { requestId });
+  });
+
+  // 6. Complete Job
+  socket.on('complete_job', (data) => {
+    const { requestId } = data;
+    const request = activeRequests.get(requestId);
+    if (!request) return;
+
+    request.status = 'completed';
+    console.log(`[Job Completed] Request ID: ${requestId}`);
+
+    // Release mechanic
+    if (request.mechanicSocketId) {
+      const mechanic = onlineMechanics.get(request.mechanicSocketId);
+      if (mechanic) {
+        mechanic.status = 'available';
+        io.to(request.mechanicSocketId).emit('job_completed', { requestId });
+        
+        // Rejoin mechanics_room since they are available again
+        const mechSocket = io.sockets.sockets.get(request.mechanicSocketId);
+        if (mechSocket) {
+          mechSocket.join("mechanics_room");
+        }
+      }
+    }
+
+    // Notify customer on their isolated room
+    io.to(`customer_${request.customerEmail}`).emit('job_completed', { requestId });
+
+    // Clean up request from active listing
+    activeRequests.delete(requestId);
+
+    // Refresh lists for customers
+    broadcastOnlineMechanics();
+  });
+
+  // 7. Cancel Job (Customer or Mechanic)
+  socket.on('cancel_job', (data) => {
+    const { requestId } = data;
+    const request = activeRequests.get(requestId);
+    if (!request) return;
+
+    const requestOwner = request.customerSocketId === socket.id;
+    const requestAssignedMech = request.mechanicSocketId === socket.id;
+
+    console.log(`[Job Cancelled] Request ID: ${requestId} by ${requestOwner ? 'Customer' : 'Mechanic'}`);
+
+    if (requestOwner) {
+      // Customer cancelled the request
+      request.status = 'cancelled';
+      
+      // Notify assigned mechanic (if any)
+      if (request.mechanicSocketId) {
+        const mechanic = onlineMechanics.get(request.mechanicSocketId);
+        if (mechanic) {
+          mechanic.status = 'available';
+          io.to(request.mechanicSocketId).emit('job_cancelled_by_customer', { requestId });
+          
+          // Rejoin mechanics_room
+          const mechSocket = io.sockets.sockets.get(request.mechanicSocketId);
+          if (mechSocket) {
+            mechSocket.join("mechanics_room");
+          }
+        }
+      }
+
+      // Notify all available mechanics in mechanics_room to remove this card
+      io.to("mechanics_room").emit('job_taken', { requestId: requestId });
+
+      io.to(`customer_${request.customerEmail}`).emit('job_cancelled_ack', { requestId });
+      activeRequests.delete(requestId);
+      
+      // Update mechanic list to customers
+      broadcastOnlineMechanics();
+    } else if (requestAssignedMech) {
+      // Mechanic backed out of the request. Put request back to pending.
+      request.status = 'pending';
+      request.mechanicSocketId = null;
+      request.mechanicName = null;
+      request.mechanicLocation = null;
+
+      // Make mechanic available again
+      const mechanic = onlineMechanics.get(socket.id);
+      if (mechanic) {
+        mechanic.status = 'available';
+        socket.join("mechanics_room"); // Rejoin availability room
+        socket.emit('job_cancelled_ack', { requestId });
+      }
+
+      // Notify customer that mechanic cancelled, request is back to searching
+      io.to(`customer_${request.customerEmail}`).emit('mechanic_cancelled', { requestId });
+
+      // Re-broadcast to all available online mechanics
+      io.to("mechanics_room").emit('new_breakdown_request', request);
+
+      // Update mechanic list to customers
+      broadcastOnlineMechanics();
+    }
+  });
+
+  // 8. Disconnect Cleanup
+  socket.on('disconnect', () => {
+    console.log(`[Socket Disconnected] ID: ${socket.id}`);
+    const user = connectedUsers.get(socket.id);
+
+    if (user) {
+      if (user.role === 'mechanic') {
+        const mechanic = onlineMechanics.get(socket.id);
+        if (mechanic) {
+          console.log(`[Offline Cleanup] Mechanic: ${mechanic.name} disconnected. Leaving room.`);
+          socket.leave("mechanics_room");
+          onlineMechanics.delete(socket.id);
+          broadcastOnlineMechanics();
+
+          // Grace period for mechanic reconnection
+          setTimeout(() => {
+            let reconnected = false;
+            connectedUsers.forEach((u) => {
+              if (u.email === user.email && u.role === 'mechanic') {
+                reconnected = true;
+              }
+            });
+
+            if (!reconnected) {
+              console.log(`[Offline Timeout] Mechanic: ${user.name} failed to reconnect. Reverting active jobs.`);
+              activeRequests.forEach((req, reqId) => {
+                if (req.mechanicEmail === user.email && req.status === 'accepted') {
+                  req.status = 'pending';
+                  req.mechanicSocketId = null;
+                  req.mechanicName = null;
+                  req.mechanicLocation = null;
+                  req.mechanicEmail = null;
+
+                  // Notify customer
+                  io.to(`customer_${req.customerEmail}`).emit('mechanic_cancelled', { requestId: reqId });
+
+                  // Re-broadcast request to mechanics room
+                  io.to("mechanics_room").emit('new_breakdown_request', req);
+                }
+              });
+            }
+          }, 60000); // 60 seconds grace period
+        }
+      } else {
+        // Customer disconnected
+        console.log(`[Offline Cleanup] Customer: ${user.name} disconnected. Starting grace periods...`);
+
+        // Grace period for pending customer requests
+        setTimeout(() => {
+          let reconnected = false;
+          connectedUsers.forEach((u) => {
+            if (u.email === user.email && u.role === 'customer') {
+              reconnected = true;
+            }
+          });
+
+          if (!reconnected) {
+            console.log(`[Offline Timeout] Customer: ${user.name} failed to reconnect. Cleaning up pending requests.`);
+            activeRequests.forEach((req, reqId) => {
+              if (req.customerEmail === user.email && req.status === 'pending') {
+                // Remove card from all mechanics
+                io.to("mechanics_room").emit('job_taken', { requestId: reqId });
+                activeRequests.delete(reqId);
+              }
+            });
+          }
+        }, 60000); // 60 seconds grace period
+
+        // Grace period for accepted customer requests (long timeout)
+        setTimeout(() => {
+          let reconnected = false;
+          connectedUsers.forEach((u) => {
+            if (u.email === user.email && u.role === 'customer') {
+              reconnected = true;
+            }
+          });
+
+          if (!reconnected) {
+            console.log(`[Offline Timeout] Customer: ${user.name} failed to reconnect. Cancelling accepted rescue.`);
+            activeRequests.forEach((req, reqId) => {
+              if (req.customerEmail === user.email && req.status === 'accepted') {
+                if (req.mechanicSocketId) {
+                  const mechanic = onlineMechanics.get(req.mechanicSocketId);
+                  if (mechanic) {
+                    mechanic.status = 'available';
+                    io.to(req.mechanicSocketId).emit('job_cancelled_by_customer', { requestId: reqId });
+                    
+                    // Rejoin mechanics_room
+                    const mechSocket = io.sockets.sockets.get(req.mechanicSocketId);
+                    if (mechSocket) {
+                      mechSocket.join("mechanics_room");
+                    }
+                  }
+                }
+                activeRequests.delete(reqId);
+              }
+            });
+          }
+        }, 180000); // 3 minutes grace period for accepted jobs
+      }
+      
+      connectedUsers.delete(socket.id);
+    }
+  });
+});
+
+server.listen(PORT, () => {
+  console.log(`====================================================`);
+  console.log(`  RoadsideRescue Server successfully started!`);
+  console.log(`  Port: ${PORT}`);
+  console.log(`  Access platform at: http://localhost:${PORT}`);
+  console.log(`====================================================`);
+});

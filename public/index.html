@@ -1,0 +1,2535 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RoadsideRescue - On-Demand Roadside Assistance</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              navy: '#1e3a8a',
+              navyHover: '#172554',
+              orange: '#f97316',
+              orangeHover: '#ea580c',
+              bgLight: '#f8fafc',
+              borderLight: '#e2e8f0'
+            }
+          },
+          fontFamily: {
+            sans: ['Outfit', 'Inter', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Google Fonts Outfit & Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    body {
+      background-color: #f8fafc;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(30, 58, 138, 0.03) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(249, 115, 22, 0.03) 0px, transparent 50%);
+      background-attachment: fixed;
+    }
+    .custom-shadow {
+      box-shadow: 0 4px 20px -2px rgba(30, 58, 138, 0.08);
+    }
+    .orange-glow {
+      box-shadow: 0 0 20px rgba(249, 115, 22, 0.35);
+    }
+    #map {
+      height: 100%;
+      width: 100%;
+      z-index: 10;
+      border-radius: 1rem;
+      border: 1px solid #e2e8f0;
+    }
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    /* Pulse Animations */
+    @keyframes pulse-ring {
+      0% { transform: scale(0.33); }
+      80%, 100% { opacity: 0; }
+    }
+    .pulsing-ring::before {
+      content: '';
+      position: absolute;
+      display: block;
+      width: 300%;
+      height: 300%;
+      box-sizing: border-box;
+      margin-left: -100%;
+      margin-top: -100%;
+      border-radius: 45px;
+      background-color: inherit;
+      animation: pulse-ring 1.5s cubic-bezier(0.215, 0.610, 0.355, 1) infinite;
+    }
+  </style>
+</head>
+<body class="h-full text-slate-800 flex flex-col font-sans antialiased overflow-hidden">
+
+  <!-- Full-Screen Auth Overlay (Light Mode Redesign) -->
+  <div id="auth-container" class="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-[9999] transition duration-300">
+    <div class="w-full max-w-md p-8 bg-white rounded-3xl custom-shadow border border-slate-100 mx-4 flex flex-col gap-6">
+      
+      <div class="text-center">
+        <!-- Logo -->
+        <img src="/logo.png" alt="RoadsideRescue Logo" class="h-16 w-auto mx-auto mb-3 object-contain">
+        <p class="text-xs text-slate-500 font-medium tracking-wide">Professional Stranded Driver Assistance Portal</p>
+      </div>
+
+      <!-- Auth Tab Switches -->
+      <div id="auth-tab-switches" class="grid grid-cols-2 p-1.5 bg-slate-100 rounded-xl border border-slate-200">
+        <button onclick="switchAuthTab('login')" id="tab-login-btn" class="py-2.5 text-xs font-bold rounded-lg bg-white text-slate-900 shadow-sm transition-all">
+          Login
+        </button>
+        <button onclick="switchAuthTab('signup')" id="tab-signup-btn" class="py-2.5 text-xs font-bold rounded-lg text-slate-500 hover:text-slate-800 transition-all">
+          Sign Up
+        </button>
+      </div>
+
+      <!-- LOGIN FORM -->
+      <form id="login-form" onsubmit="handleLogin(event)" class="flex flex-col gap-4">
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Email Address</label>
+          <input type="email" id="login-email" required placeholder="e.g. customer@resq.com" class="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm font-semibold transition focus:border-brand-navy focus:bg-white focus:outline-none">
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Password</label>
+          <input type="password" id="login-password" required placeholder="••••••••" class="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm font-semibold transition focus:border-brand-navy focus:bg-white focus:outline-none">
+        </div>
+        <button type="submit" class="w-full mt-2 py-3.5 bg-brand-navy hover:bg-brand-navyHover text-white font-bold rounded-xl text-xs uppercase tracking-widest shadow-md transition">
+          Access Dashboard
+        </button>
+        <p class="text-[10px] text-center text-slate-400 mt-1">Demo credentials: <strong class="text-brand-navy">customer@resq.com</strong> / <strong class="text-brand-navy">mechanic@resq.com</strong> (pass: <strong class="text-slate-600">password123</strong>)</p>
+      </form>
+
+      <!-- OTP VERIFICATION FORM -->
+      <form id="otp-form" onsubmit="handleVerifyOTP(event)" class="hidden flex flex-col gap-5">
+        <div class="text-center flex flex-col gap-2">
+          <div class="w-12 h-12 rounded-full bg-orange-100 border border-brand-orange/20 text-brand-orange flex items-center justify-center mx-auto text-xl shadow-sm">
+            🔒
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-slate-800">Verification Code Sent</h3>
+            <p class="text-[11px] text-slate-500 mt-0.5">We sent a 6-digit security code to:</p>
+            <p class="text-xs font-bold text-brand-navy select-all mt-0.5" id="otp-target-email">user@resq.com</p>
+            <!-- Development Mode Helper -->
+            <div id="otp-dev-hint" class="hidden flex flex-col gap-1.5 mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-center">
+              <span class="text-[10px] font-bold text-amber-800 uppercase tracking-wide">Developer Mode Hint</span>
+              <p class="text-[11px] text-amber-700">Since SMTP is not configured, your OTP code is:</p>
+              <strong class="text-lg font-bold text-brand-orange tracking-widest select-all" id="otp-dev-value">------</strong>
+              <a id="otp-dev-preview-link" href="#" target="_blank" class="hidden text-[10px] text-amber-600 font-semibold hover:underline mt-1">
+                ✉️ View Email Preview
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">Enter 6-Digit Passcode</label>
+          <div class="flex justify-between gap-1.5" id="otp-inputs-container">
+            <input type="text" maxlength="1" required class="otp-input w-11 h-12 text-center text-lg font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:border-brand-orange focus:bg-white focus:ring-1 focus:ring-brand-orange focus:outline-none transition-all">
+            <input type="text" maxlength="1" required class="otp-input w-11 h-12 text-center text-lg font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:border-brand-orange focus:bg-white focus:ring-1 focus:ring-brand-orange focus:outline-none transition-all">
+            <input type="text" maxlength="1" required class="otp-input w-11 h-12 text-center text-lg font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:border-brand-orange focus:bg-white focus:ring-1 focus:ring-brand-orange focus:outline-none transition-all">
+            <input type="text" maxlength="1" required class="otp-input w-11 h-12 text-center text-lg font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:border-brand-orange focus:bg-white focus:ring-1 focus:ring-brand-orange focus:outline-none transition-all">
+            <input type="text" maxlength="1" required class="otp-input w-11 h-12 text-center text-lg font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:border-brand-orange focus:bg-white focus:ring-1 focus:ring-brand-orange focus:outline-none transition-all">
+            <input type="text" maxlength="1" required class="otp-input w-11 h-12 text-center text-lg font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:border-brand-orange focus:bg-white focus:ring-1 focus:ring-brand-orange focus:outline-none transition-all">
+          </div>
+        </div>
+
+        <button type="submit" class="w-full mt-1 py-3.5 bg-brand-orange hover:bg-brand-orangeHover text-white font-bold rounded-xl text-xs uppercase tracking-widest shadow-md transition orange-glow active:scale-98">
+          Verify Security Code
+        </button>
+
+        <div class="flex items-center justify-between text-[11px] mt-1 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+          <button type="button" id="resend-otp-btn" onclick="handleResendOTP()" class="text-brand-navy hover:text-brand-navyHover font-bold hover:underline transition">Resend Code</button>
+          <span id="otp-timer" class="text-slate-400 font-semibold">Resend in 30s</span>
+        </div>
+
+        <button type="button" onclick="cancelOTPFlow()" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-600 font-bold rounded-xl text-xs uppercase tracking-wider transition">
+          Back to Login
+        </button>
+      </form>
+
+      <!-- SIGN UP FORM -->
+      <form id="signup-form" onsubmit="handleSignUp(event)" class="hidden flex flex-col gap-4">
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Full Name</label>
+          <input type="text" id="register-name" required placeholder="e.g. Jane Wrench" class="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm font-semibold transition focus:border-brand-navy focus:bg-white focus:outline-none">
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Email Address</label>
+          <input type="email" id="register-email" required placeholder="e.g. mechanic@resq.com" class="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm font-semibold transition focus:border-brand-navy focus:bg-white focus:outline-none">
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Phone Number</label>
+          <input type="text" id="register-phone" required placeholder="e.g. +1 (555) 014-9988" class="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm font-semibold transition focus:border-brand-navy focus:bg-white focus:outline-none">
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Password</label>
+          <input type="password" id="register-password" required placeholder="••••••••" class="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm font-semibold transition focus:border-brand-navy focus:bg-white focus:outline-none">
+        </div>
+        
+        <!-- Role Selection -->
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Account Role</label>
+          <div class="grid grid-cols-2 gap-3">
+            <button type="button" id="reg-role-customer" onclick="selectRegRole('customer')" class="p-3 rounded-xl bg-slate-50 border-2 border-brand-navy text-brand-navy font-semibold flex flex-col items-center gap-1 transition">
+              <i data-lucide="user" class="w-4 h-4"></i>
+              <span class="text-[10px] font-bold">Customer</span>
+            </button>
+            <button type="button" id="reg-role-mechanic" onclick="selectRegRole('mechanic')" class="p-3 rounded-xl bg-slate-50 border-2 border-transparent hover:bg-slate-100 text-slate-500 font-semibold flex flex-col items-center gap-1 transition">
+              <i data-lucide="wrench" class="w-4 h-4"></i>
+              <span class="text-[10px] font-bold">Mechanic</span>
+            </button>
+          </div>
+        </div>
+
+        <button type="submit" class="w-full mt-2 py-3.5 bg-brand-navy hover:bg-brand-navyHover text-white font-bold rounded-xl text-xs uppercase tracking-widest shadow-md transition">
+          Create Account
+        </button>
+      </form>
+
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header class="w-full py-4 px-6 bg-white border-b border-slate-200 flex items-center justify-between shrink-0 z-30 shadow-sm">
+    <!-- Logo & Title -->
+    <div class="flex items-center gap-3">
+      <img src="/logo.png" alt="RoadsideRescue Logo" class="h-10 w-auto object-contain">
+      <div class="hidden sm:block border-l border-slate-200 pl-3 leading-none">
+        <h1 class="text-sm font-bold tracking-wider text-brand-navy uppercase">
+          RoadsideRescue
+        </h1>
+        <div class="flex items-center gap-1 mt-0.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span class="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Active Status Hub</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toggle Role Switcher (Unified Need Help vs Available Work Tab Switcher) -->
+    <div id="role-switcher-wrapper" class="bg-slate-100 p-1 rounded-full flex border border-slate-200 max-w-[320px]">
+      <button id="toggle-customer" onclick="setRole('customer')" class="px-4 py-1.5 rounded-full text-xs font-bold tracking-wide transition-all flex items-center gap-1.5 text-white bg-brand-navy shadow-sm">
+        Need Help
+      </button>
+      <button id="toggle-mechanic" onclick="setRole('mechanic')" class="px-4 py-1.5 rounded-full text-xs font-bold tracking-wide transition-all flex items-center gap-1.5 text-slate-500 hover:text-slate-800">
+        Available for Work
+      </button>
+    </div>
+
+    <!-- Right Header Profile / Logout Controls -->
+    <div class="flex items-center gap-3">
+      <!-- Session User Panel -->
+      <div class="hidden md:flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
+        <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-brand-navy to-blue-700 flex items-center justify-center text-xs font-bold text-white uppercase" id="user-avatar">
+          U
+        </div>
+        <div class="text-left leading-none pr-1 flex flex-col gap-1">
+          <span class="text-xs font-bold block text-slate-800 max-w-[100px] truncate" id="user-display-name">User</span>
+          <span id="user-role-badge" class="text-[9px] font-bold uppercase tracking-wider text-slate-500">Role</span>
+        </div>
+      </div>
+
+      <!-- Logout Button -->
+      <button onclick="handleLogout()" class="p-2.5 bg-slate-50 hover:bg-red-50 hover:text-red-600 text-slate-500 rounded-xl border border-slate-200 hover:border-red-200 transition flex items-center justify-center gap-1 text-xs font-bold shadow-sm">
+        <i data-lucide="log-out" class="w-4 h-4"></i>
+        <span class="hidden lg:inline">Log Out</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Workspace Grid -->
+  <main class="flex-grow flex flex-col lg:flex-row overflow-hidden p-4 gap-4">
+    
+    <!-- Control Dashboard Column (Customer / Mechanic depending on mode) -->
+    <section class="w-full lg:w-[420px] shrink-0 flex flex-col gap-4 overflow-y-auto no-scrollbar justify-between">
+      
+      <!-- CUSTOMER CONTROL PANEL -->
+      <div id="customer-panel" class="flex flex-col gap-4 flex-grow">
+        <!-- Dashboard Status Info -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 flex flex-col gap-4 shadow-sm">
+          <div class="flex items-center justify-between">
+            <h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
+              <i data-lucide="navigation-2" class="w-4 h-4 text-brand-navy"></i>
+              Assistance Center
+            </h2>
+            <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200">
+              Customer Mode
+            </span>
+          </div>
+
+          <!-- GPS Detection -->
+          <div class="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-medium text-slate-500">Your Location</span>
+              <div class="flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-rose-500" id="gps-status-dot"></span>
+                <span class="text-[11px] font-bold text-rose-500" id="gps-status-text">Not Detected</span>
+              </div>
+            </div>
+            <div class="text-xs font-mono text-slate-700 bg-white p-2 rounded-lg border border-slate-100" id="gps-coords-display">
+              Lat: --, Lng: --
+            </div>
+            <button id="detect-gps-btn" onclick="detectLocation()" class="w-full py-2.5 px-4 rounded-xl bg-brand-navy hover:bg-brand-navyHover text-white font-bold text-xs tracking-wider uppercase transition shadow flex items-center justify-center gap-2">
+              <i data-lucide="locate-fixed" class="w-4 h-4"></i>
+              Detect My Current Location
+            </button>
+          </div>
+        </div>
+
+        <!-- Available Responders Pool -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 flex flex-col gap-4 max-h-[220px] shadow-sm">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center justify-between">
+            <span>Available Responders Nearby</span>
+            <span id="mech-count-badge" class="px-2 py-0.5 bg-slate-100 rounded text-slate-600 border border-slate-200 text-[10px] font-bold">0 Online</span>
+          </h3>
+          <div id="customer-mechs-list" class="flex flex-col gap-2 overflow-y-auto no-scrollbar">
+            <div id="mechs-empty-state" class="text-center py-6 text-slate-400 text-xs">
+              <i data-lucide="wrench" class="w-5 h-5 mx-auto mb-1.5 text-slate-400 animate-pulse"></i>
+              No active mechanics online nearby.
+            </div>
+          </div>
+        </div>
+
+        <!-- Help Request Form / Status -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 flex-grow flex flex-col justify-between min-h-[340px] shadow-sm">
+          
+          <!-- Request Fields Form -->
+          <div id="request-form-container" class="flex flex-col gap-4">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-500">Describe Emergency</h3>
+            
+            <!-- Vehicle Selection Cards -->
+            <div class="flex flex-col gap-2">
+              <label class="text-[11px] font-bold text-slate-500">Vehicle Type</label>
+              <div class="grid grid-cols-2 gap-3">
+                <button type="button" onclick="selectVehicle('Car')" id="vehicle-car-btn" class="py-3.5 px-4 rounded-xl border-2 border-brand-orange bg-orange-50/50 text-brand-orange font-bold flex items-center justify-center gap-2 transition duration-300">
+                  <i data-lucide="car" class="w-5 h-5"></i>
+                  Car
+                </button>
+                <button type="button" onclick="selectVehicle('Bike')" id="vehicle-bike-btn" class="py-3.5 px-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-500 font-bold flex items-center justify-center gap-2 transition duration-300">
+                  <i data-lucide="bike" class="w-5 h-5"></i>
+                  Bike
+                </button>
+              </div>
+            </div>
+
+            <!-- Problem presets -->
+            <div class="flex flex-col gap-2">
+              <label class="text-[11px] font-bold text-slate-500">Quick Tags</label>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" onclick="applyPreset('Flat Tire')" class="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs border border-slate-200 text-slate-700 font-semibold transition">🔧 Flat Tire</button>
+                <button type="button" onclick="applyPreset('Battery Dead')" class="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs border border-slate-200 text-slate-700 font-semibold transition">⚡ Battery Dead</button>
+                <button type="button" onclick="applyPreset('Engine Overheat')" class="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs border border-slate-200 text-slate-700 font-semibold transition">🔥 Overheating</button>
+                <button type="button" onclick="applyPreset('Out of Fuel')" class="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs border border-slate-200 text-slate-700 font-semibold transition">⛽ Out of Fuel</button>
+              </div>
+            </div>
+
+            <!-- Description Text -->
+            <div class="flex flex-col gap-2">
+              <label class="text-[11px] font-bold text-slate-500">Problem Details</label>
+              <textarea id="request-description" rows="3" placeholder="Describe the breakdown issue..." class="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 text-sm placeholder-slate-400 font-medium resize-none transition focus:border-brand-navy focus:bg-white focus:outline-none"></textarea>
+            </div>
+            
+            <button id="send-request-btn" onclick="submitRequest()" class="w-full py-4.5 bg-brand-orange hover:bg-brand-orangeHover text-white font-bold rounded-xl text-sm uppercase tracking-widest transition duration-300 shadow-lg shadow-orange-500/10 hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2 py-4">
+              <i data-lucide="alert-triangle" class="w-5 h-5"></i>
+              Broadcast Emergency Request
+            </button>
+          </div>
+
+          <!-- Active Rescue Tracking Panel (Live Tracking Overlay State - Light Mode Redesign) -->
+          <div id="request-tracking-container" class="hidden flex-col gap-5 flex-grow py-2">
+            
+            <div class="flex items-center gap-3">
+              <div class="relative w-12 h-12 rounded-xl bg-orange-500/10 border border-brand-orange flex items-center justify-center text-brand-orange pulsing-ring shrink-0">
+                <i data-lucide="radio" class="w-6 h-6 animate-pulse"></i>
+              </div>
+              <div>
+                <h4 class="font-bold text-slate-900 text-sm" id="tracking-status-title">Broadcasting Request</h4>
+                <p class="text-xs text-slate-500" id="tracking-status-desc">Searching for nearby responders...</p>
+              </div>
+            </div>
+
+            <!-- Progress Stepper UI -->
+            <div class="relative pl-6 border-l border-slate-200 flex flex-col gap-6 my-4 text-xs font-semibold ml-4">
+              <div class="relative">
+                <span class="absolute -left-[30px] top-0 w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center text-[8px] text-white">✓</span>
+                <p class="text-emerald-600 font-bold">Request Registered</p>
+                <p class="text-[10px] text-slate-400" id="tracking-step1-time">--:--</p>
+              </div>
+              <div class="relative">
+                <span class="absolute -left-[30px] top-0 w-4 h-4 rounded-full bg-slate-200 border border-slate-300 flex items-center justify-center text-[8px] text-slate-600" id="step2-indicator">2</span>
+                <p class="text-slate-500" id="step2-title">Mechanic Dispatched</p>
+                <p class="text-[10px] text-slate-400" id="step2-desc">Awaiting matching...</p>
+              </div>
+              <div class="relative">
+                <span class="absolute -left-[30px] top-0 w-4 h-4 rounded-full bg-slate-200 border border-slate-300 flex items-center justify-center text-[8px] text-slate-600" id="step3-indicator">3</span>
+                <p class="text-slate-500" id="step3-title">Arrived</p>
+                <p class="text-[10px] text-slate-400" id="step3-desc">Awaiting arrival confirmation...</p>
+              </div>
+            </div>
+
+            <!-- Matched Mechanic Card (Glow Orange details) -->
+            <div id="matched-mechanic-card" class="hidden p-4 rounded-2xl bg-slate-50 border border-slate-200 shadow-sm">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <div class="w-10 h-10 rounded-xl bg-orange-500 text-white flex items-center justify-center font-bold shadow-md shadow-orange-500/20 text-sm">
+                    👷
+                  </div>
+                  <div>
+                    <h5 class="font-bold text-sm text-slate-800" id="matched-mech-name">Mechanic Name</h5>
+                    <p class="text-[10px] text-slate-500 font-semibold mt-0.5" id="matched-mech-phone">📞 Not Provided</p>
+                    <div class="flex items-center gap-2 mt-1">
+                      <span id="matched-mech-status" class="px-2 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200 text-[8px] font-bold uppercase">En Route</span>
+                      <div class="flex items-center gap-0.5 text-[10px] text-brand-orange font-bold">
+                        <i data-lucide="star" class="w-3 h-3 fill-current"></i>
+                        <span>4.9</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- Action Buttons: Phone & SOS / Location -->
+                <div class="flex gap-2">
+                  <a id="matched-mech-phone-link" href="tel:123456789" class="w-9 h-9 bg-brand-navy hover:bg-brand-navyHover text-white rounded-xl flex items-center justify-center shadow transition active:scale-95">
+                    <i data-lucide="phone" class="w-4 h-4"></i>
+                  </a>
+                  <button onclick="shareSOSLocation()" class="px-3 py-1.5 bg-brand-orange hover:bg-brand-orangeHover text-white text-[11px] font-bold rounded-xl flex items-center gap-1 transition orange-glow active:scale-95">
+                    <i data-lucide="alert-octagon" class="w-3.5 h-3.5"></i>
+                    SOS Share
+                  </button>
+                </div>
+              </div>
+              <p class="text-[10px] text-slate-500 mt-3 border-t border-slate-100 pt-2 italic text-center">Track your mechanic en route dynamically on the map above.</p>
+            </div>
+
+            <button onclick="cancelRequest()" class="w-full mt-auto py-3 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 font-bold rounded-xl text-xs uppercase tracking-wider transition">
+              Cancel Request
+            </button>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- MECHANIC CONTROL PANEL -->
+      <div id="mechanic-panel" class="hidden flex-col gap-4 flex-grow">
+        <!-- Online/Offline Panel -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 flex flex-col gap-4 shadow-sm">
+          <div class="flex items-center justify-between">
+            <h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
+              <i data-lucide="wrench" class="w-4 h-4 text-brand-orange"></i>
+              Responder Portal
+            </h2>
+            <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200">
+              Mechanic Mode
+            </span>
+          </div>
+
+          <!-- GPS Detection -->
+          <div class="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-medium text-slate-500">Responder Position</span>
+              <div class="flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-rose-500" id="mech-gps-dot"></span>
+                <span class="text-[11px] font-bold text-rose-500" id="mech-gps-text">Not Detected</span>
+              </div>
+            </div>
+            <div class="text-xs font-mono text-slate-700 bg-white p-2 rounded-lg border border-slate-100" id="mech-gps-coords">
+              Lat: --, Lng: --
+            </div>
+            <button onclick="detectLocation()" class="w-full py-2 px-4 rounded-xl bg-brand-navy hover:bg-brand-navyHover text-white font-bold text-xs tracking-wider uppercase transition shadow flex items-center justify-center gap-2">
+              <i data-lucide="locate-fixed" class="w-4 h-4"></i>
+              Acquire GPS Location
+            </button>
+          </div>
+
+          <!-- Availability Toggle (Glows green when active) -->
+          <div class="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-200">
+            <div>
+              <p class="text-xs font-bold text-slate-800">Online Availability</p>
+              <p class="text-[10px] text-slate-400 font-semibold" id="mechanic-status-desc">Status: OFFLINE</p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="availability-toggle" onchange="toggleMechanicStatus()" class="sr-only peer" disabled>
+              <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 shadow-inner"></div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Requests list / Current Job Dashboard -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 flex-grow flex flex-col justify-between min-h-[380px] shadow-sm">
+          
+          <!-- Incoming Requests (Available state) -->
+          <div id="mech-available-jobs-container" class="flex flex-col gap-4 flex-grow">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center justify-between">
+              <span>Active Emergencies Queue</span>
+              <span id="job-count-badge" class="px-2 py-0.5 bg-slate-100 rounded text-slate-600 border border-slate-200 text-[10px] font-bold">0</span>
+            </h3>
+            
+            <!-- List of available jobs -->
+            <div id="mech-jobs-list" class="flex flex-col gap-3 overflow-y-auto max-h-[300px] pr-1">
+              <!-- Empty state -->
+              <div id="jobs-empty-state" class="text-center py-10 text-slate-400">
+                <i data-lucide="radio" class="w-8 h-8 mx-auto mb-2 text-slate-300 animate-pulse"></i>
+                <p class="text-xs font-semibold">Go online to listen for emergencies</p>
+                <p class="text-[10px] text-slate-400 mt-1">Make sure GPS is acquired first</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Ongoing Job Panel (Busy state) -->
+          <div id="mech-active-job-container" class="hidden flex-col gap-4 flex-grow">
+            <div class="flex items-center gap-3 pb-3 border-b border-slate-200">
+              <div class="w-10 h-10 rounded-xl bg-orange-500/15 border border-brand-orange flex items-center justify-center text-brand-orange">
+                <i data-lucide="truck" class="w-5 h-5"></i>
+              </div>
+              <div>
+                <h4 class="font-bold text-xs text-slate-800">Active Rescue Operations</h4>
+                <p class="text-[10px] text-brand-orange font-bold tracking-wide uppercase">En Route to Driver</p>
+              </div>
+            </div>
+
+            <!-- Customer and Issue Details -->
+            <div class="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col gap-3">
+              <div>
+                <span class="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Customer</span>
+                <span class="text-xs font-bold text-slate-800" id="active-job-cust-name">John Doe</span>
+              </div>
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <span class="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Vehicle</span>
+                  <span class="text-xs font-bold text-brand-navy" id="active-job-vehicle">Car</span>
+                </div>
+                <div>
+                  <span class="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Distance</span>
+                  <span class="text-xs font-bold text-brand-orange" id="active-job-distance">-- km</span>
+                </div>
+              </div>
+              <div>
+                <span class="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Reported Problem</span>
+                <p class="text-xs text-slate-600 mt-1 leading-relaxed bg-white p-2 rounded-lg border border-slate-100" id="active-job-desc">Flat Tire on front wheel</p>
+              </div>
+            </div>
+
+            <div class="text-[10px] text-slate-500 italic text-center p-2 bg-slate-50 border border-slate-200 rounded-lg">
+              Demo Helper: To simulate moving closer to the customer, click and drag your orange responder pin on the map!
+            </div>
+
+            <!-- Action buttons -->
+            <div class="flex flex-col gap-2 mt-auto">
+              <button onclick="completeActiveJob()" class="w-full py-3 bg-brand-orange hover:bg-brand-orangeHover text-white font-bold rounded-xl text-xs uppercase tracking-wider transition orange-glow active:scale-95">
+                Mark Job Completed
+              </button>
+              <button onclick="cancelActiveJob()" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-600 font-bold rounded-xl text-xs uppercase tracking-wider transition">
+                Cancel Operations
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Map Column -->
+    <section class="flex-grow relative min-h-[300px] lg:min-h-0">
+      <div id="map"></div>
+      
+      <!-- Simulation Helper Box floating in map -->
+      <div class="absolute bottom-4 left-4 bg-white/95 backdrop-blur-sm px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-600 shadow-md max-w-[280px] leading-relaxed z-[1000] flex flex-col gap-1.5">
+        <span class="font-bold text-brand-navy flex items-center gap-1.5">
+          <i data-lucide="info" class="w-4 h-4 text-brand-orange"></i>
+          Interactive Simulation
+        </span>
+        <span>Drag pins on the map to simulate movements and watch matching updates in real-time.</span>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Floating Chatbot Toggle Button -->
+  <button id="chatbot-toggle-btn" class="hidden fixed bottom-6 right-6 w-14 h-14 bg-brand-orange text-white rounded-full flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition-all z-[9999] orange-glow">
+    <i data-lucide="message-square" class="w-6 h-6"></i>
+  </button>
+
+  <!-- Chatbot Window -->
+  <div id="chatbot-window" class="hidden fixed bottom-24 right-6 w-[360px] h-[480px] bg-white border border-slate-200 rounded-2xl flex flex-col shadow-2xl z-[9999] overflow-hidden transition-all duration-300 transform scale-95 translate-y-4 opacity-0">
+    <!-- Chatbot Header -->
+    <div class="bg-brand-navy text-white px-4 py-3 flex items-center justify-between shadow">
+      <div class="flex items-center gap-2">
+        <div class="relative w-8 h-8 rounded-lg bg-orange-500 flex items-center justify-center text-sm font-bold shadow-md shadow-orange-500/20">
+          🤖
+          <span class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 border border-brand-navy animate-pulse"></span>
+        </div>
+        <div>
+          <h4 class="font-bold text-xs">RescueAssistant AI</h4>
+          <p class="text-[9px] text-slate-300 font-semibold">Active Emergency Support</p>
+        </div>
+      </div>
+      <button id="chatbot-close-btn" class="text-slate-300 hover:text-white transition">
+        <i data-lucide="x" class="w-4 h-4"></i>
+      </button>
+    </div>
+
+    <!-- Chat Quick Presets -->
+    <div class="px-4 py-2 border-b border-slate-100 bg-slate-50 flex gap-1.5 overflow-x-auto no-scrollbar scroll-smooth">
+      <button onclick="sendChatbotPreset('Safety tips for highway breakdown?')" class="flex-shrink-0 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-[10px] text-slate-700 font-semibold hover:border-brand-orange hover:text-brand-orange transition shadow-sm">🛡️ Safety Tips</button>
+      <button onclick="sendChatbotPreset('How to change flat tire safely?')" class="flex-shrink-0 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-[10px] text-slate-700 font-semibold hover:border-brand-orange hover:text-brand-orange transition shadow-sm">🔧 Flat Tire</button>
+      <button onclick="sendChatbotPreset('My car is overheating, what should I do?')" class="flex-shrink-0 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-[10px] text-slate-700 font-semibold hover:border-brand-orange hover:text-brand-orange transition shadow-sm">🔥 Overheating</button>
+      <button onclick="sendChatbotPreset('How to jump start a battery?')" class="flex-shrink-0 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-[10px] text-slate-700 font-semibold hover:border-brand-orange hover:text-brand-orange transition shadow-sm">⚡ Jump Start</button>
+    </div>
+
+    <!-- Chat Messages -->
+    <div id="chatbot-messages" class="flex-grow p-4 overflow-y-auto flex flex-col gap-3 bg-slate-50/50 no-scrollbar">
+      <!-- Bot welcome message -->
+      <div class="flex gap-2 text-xs">
+        <div class="w-7 h-7 rounded-lg bg-orange-500 text-white flex items-center justify-center font-bold text-[10px] shadow-sm flex-shrink-0">🤖</div>
+        <div class="bg-white border border-slate-200 text-slate-800 p-3 rounded-2xl rounded-tl-none shadow-sm max-w-[80%] text-left font-medium leading-relaxed">
+          Hello! I am <strong>RescueAssistant AI</strong>, your emergency guide. 
+          <br><br>
+          If you are stranded or waiting for a mechanic, ask me how to stay safe or handle immediate vehicle steps!
+        </div>
+      </div>
+    </div>
+
+    <!-- Chat Typing Indicator -->
+    <div id="chatbot-typing" class="hidden px-4 py-2 bg-slate-50/50 flex gap-2 text-xs text-slate-400 items-center">
+      <div class="w-7 h-7 rounded-lg bg-orange-500/20 text-orange-600 flex items-center justify-center font-bold text-[10px] flex-shrink-0">🤖</div>
+      <div class="bg-white border border-slate-200 p-2.5 rounded-2xl rounded-tl-none shadow-sm flex gap-1 items-center">
+        <span class="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
+        <span class="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style="animation-delay: 150ms"></span>
+        <span class="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style="animation-delay: 300ms"></span>
+      </div>
+    </div>
+
+    <!-- Chat Input Form -->
+    <form id="chatbot-form" class="p-3 border-t border-slate-200 bg-white flex gap-2 items-center">
+      <input type="text" id="chatbot-input" placeholder="Type a message..." class="flex-grow p-2.5 rounded-xl border border-slate-200 bg-slate-50 text-xs placeholder-slate-400 font-medium focus:border-brand-orange focus:bg-white focus:outline-none transition">
+      <button type="submit" class="w-9 h-9 bg-brand-navy hover:bg-brand-navyHover text-white rounded-xl flex items-center justify-center shadow-md transition active:scale-95 shrink-0">
+        <i data-lucide="send" class="w-4 h-4"></i>
+      </button>
+    </form>
+  </div>
+
+  <!-- Incoming Job Alert Card (High-urgency Modal Popup - Light Mode Redesign) -->
+  <div id="incoming-alert-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-center justify-center z-[99999] transition duration-300">
+    <div class="w-full max-w-sm p-6 bg-white rounded-3xl border-2 border-brand-orange shadow-2xl mx-4 flex flex-col gap-4 animate-zoomIn">
+      <div class="flex items-center gap-3">
+        <div class="w-11 h-11 rounded-full bg-orange-500 text-white flex items-center justify-center text-base shadow-md shadow-orange-500/20 shrink-0">
+          ⚠️
+        </div>
+        <div>
+          <h4 class="font-bold text-slate-900 text-sm uppercase tracking-wide">Emergency Call Received</h4>
+          <p class="text-[11px] text-slate-500" id="incoming-alert-time">Just Now</p>
+        </div>
+      </div>
+      
+      <!-- Request stats inside modal -->
+      <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl flex flex-col gap-2 text-xs">
+        <div class="flex justify-between">
+          <span class="text-slate-400 font-bold">Caller:</span>
+          <span class="font-bold text-slate-800" id="incoming-alert-name">Alice</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-400 font-bold">Vehicle:</span>
+          <span class="font-bold text-brand-navy" id="incoming-alert-vehicle">Car</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-400 font-bold">Distance:</span>
+          <span class="font-bold text-brand-orange" id="incoming-alert-distance">2.1 km away</span>
+        </div>
+        <div class="mt-1 border-t border-slate-200 pt-2 text-slate-600 leading-relaxed font-medium">
+          <strong>Problem: </strong> <span id="incoming-alert-description">Flat tire roadside</span>
+        </div>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="grid grid-cols-2 gap-3 mt-1">
+        <button onclick="declineAlertJob()" class="py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-lg text-xs uppercase transition">
+          Decline
+        </button>
+        <button onclick="acceptAlertJob()" class="py-2.5 bg-brand-orange hover:bg-brand-orangeHover text-white font-bold rounded-lg text-xs uppercase shadow transition active:scale-95">
+          Accept & Navigate
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sliding Custom Toast Notification Hub -->
+  <div id="toast-container" class="fixed top-6 right-6 flex flex-col gap-3 z-[9999] pointer-events-none max-w-[320px]"></div>
+
+  <!-- Socket.io client -->
+  <script src="/socket.io/socket.io.js"></script>
+
+  <!-- Main JavaScript App Logic -->
+  <script>
+    // ENTER YOUR GOOGLE MAPS API KEY HERE (leave blank for development watermark mode)
+    let GOOGLE_MAPS_API_KEY = '';
+
+    let socket;
+    let currentRole = 'customer';
+    let userName = '';
+    let userEmail = '';
+    let myLocation = null;
+    let selectedVehicle = 'Car';
+    
+    // Google Map State
+    let map = null;
+    let myMarker = null;
+    let otherMarker = null;
+    let mapRouteLine = null;
+    
+    // Track other mechanics' markers on the Customer's map
+    let customerMechanicMarkers = new Map(); // socketId -> HTMLMarker
+
+    // Socket Registered Info
+    let socketId = null;
+    let isMechanicOnline = false;
+    let activeAssistanceRequest = null;
+    let availableJobs = [];
+    let pendingAlertRequest = null; // Hold currently alerting job
+
+    // Form registration variables
+    let selectedRegRole = 'customer';
+    let currentAuthTab = 'login';
+    let otpEmail = '';
+    let otpTimerInterval = null;
+
+    // Light Map Styling for Professional light background
+    const lightMapStyle = [
+      {
+        featureType: "water",
+        elementType: "geometry",
+        stylers: [{ color: "#e9e9e9" }, { lightness: 17 }]
+      },
+      {
+        featureType: "landscape",
+        elementType: "geometry",
+        stylers: [{ color: "#f5f5f5" }, { lightness: 20 }]
+      },
+      {
+        featureType: "road.highway",
+        elementType: "geometry.fill",
+        stylers: [{ color: "#ffffff" }, { lightness: 17 }]
+      },
+      {
+        featureType: "road.highway",
+        elementType: "geometry.stroke",
+        stylers: [{ color: "#ffffff" }, { lightness: 29 }, { weight: 0.2 }]
+      },
+      {
+        featureType: "road.arterial",
+        elementType: "geometry",
+        stylers: [{ color: "#ffffff" }, { lightness: 18 }]
+      },
+      {
+        featureType: "road.local",
+        elementType: "geometry",
+        stylers: [{ color: "#ffffff" }, { lightness: 16 }]
+      },
+      {
+        featureType: "poi",
+        elementType: "geometry",
+        stylers: [{ color: "#f5f5f5" }, { lightness: 21 }]
+      },
+      {
+        featureType: "poi.park",
+        elementType: "geometry",
+        stylers: [{ color: "#dedede" }, { lightness: 21 }]
+      },
+      {
+        elementType: "labels.text.stroke",
+        stylers: [{ visibility: "on" }, { color: "#ffffff" }, { lightness: 16 }]
+      },
+      {
+        elementType: "labels.text.fill",
+        stylers: [{ saturation: 36 }, { color: "#333333" }, { lightness: 40 }]
+      },
+      {
+        elementType: "labels.icon",
+        stylers: [{ visibility: "off" }]
+      },
+      {
+        featureType: "transit",
+        elementType: "geometry",
+        stylers: [{ color: "#f2f2f2" }, { lightness: 19 }]
+      },
+      {
+        featureType: "administrative",
+        elementType: "geometry.fill",
+        stylers: [{ color: "#fefefe" }, { lightness: 20 }]
+      },
+      {
+        featureType: "administrative",
+        elementType: "geometry.stroke",
+        stylers: [{ color: "#fefefe" }, { lightness: 17 }, { weight: 1.2 }]
+      }
+    ];
+
+    // Custom HTML Marker Overlay Class
+    let HTMLMarker;
+
+    function defineHTMLMarkerClass() {
+      HTMLMarker = class extends google.maps.OverlayView {
+        constructor(latlng, map, html, dragCallback) {
+          super();
+          this.latlng = new google.maps.LatLng(latlng.lat, latlng.lng);
+          this.html = html;
+          this.dragCallback = dragCallback;
+          this.div = null;
+          this.setMap(map);
+        }
+        
+        onAdd() {
+          this.div = document.createElement('div');
+          this.div.style.position = 'absolute';
+          this.div.style.cursor = this.dragCallback ? 'grab' : 'default';
+          this.div.innerHTML = this.html;
+          
+          const panes = this.getPanes();
+          panes.overlayMouseTarget.appendChild(this.div);
+          
+          if (this.dragCallback) {
+            let isDragging = false;
+            
+            const moveHandler = (e) => {
+              const proj = this.getProjection();
+              const mapDiv = this.getMap().getDiv();
+              const rect = mapDiv.getBoundingClientRect();
+              const x = e.clientX - rect.left;
+              const y = e.clientY - rect.top;
+              
+              const latlng = proj.fromContainerPixelToLatLng(new google.maps.Point(x, y));
+              if (latlng) {
+                this.latlng = latlng;
+                this.draw();
+              }
+            };
+
+            const upHandler = () => {
+              isDragging = false;
+              this.div.style.cursor = 'grab';
+              this.getMap().setOptions({ draggable: true });
+              
+              window.removeEventListener('mousemove', moveHandler);
+              window.removeEventListener('mouseup', upHandler);
+              
+              if (this.dragCallback) {
+                this.dragCallback({
+                  lat: this.latlng.lat(),
+                  lng: this.latlng.lng()
+                });
+              }
+            };
+
+            this.div.addEventListener('mousedown', (e) => {
+              isDragging = true;
+              this.div.style.cursor = 'grabbing';
+              this.getMap().setOptions({ draggable: false });
+              
+              window.addEventListener('mousemove', moveHandler);
+              window.addEventListener('mouseup', upHandler);
+              e.stopPropagation();
+              e.preventDefault();
+            });
+          }
+        }
+        
+        draw() {
+          if (!this.div) return;
+          const proj = this.getProjection();
+          if (!proj) return;
+          const pos = proj.fromLatLngToDivPixel(this.latlng);
+          this.div.style.left = (pos.x - 18) + 'px';
+          this.div.style.top = (pos.y - 18) + 'px';
+        }
+        
+        onRemove() {
+          if (this.div) {
+            this.div.parentNode.removeChild(this.div);
+            this.div = null;
+          }
+        }
+        
+        setLatLng(latlng) {
+          this.latlng = new google.maps.LatLng(latlng.lat, latlng.lng);
+          this.draw();
+        }
+      };
+    }
+
+    // OTP Input Listeners for Auto-Focus Chaining
+    function setupOTPInputListeners() {
+      const inputs = document.querySelectorAll('.otp-input');
+      inputs.forEach((input, index) => {
+        // Auto-shift focus on typing digits
+        input.addEventListener('input', (e) => {
+          const value = e.target.value;
+          if (value.length > 0) {
+            e.target.value = value.charAt(0);
+            if (index < inputs.length - 1) {
+              inputs[index + 1].focus();
+            }
+          }
+        });
+
+        // Keydown handler for backspace navigation
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Backspace') {
+            if (input.value === '') {
+              if (index > 0) {
+                inputs[index - 1].focus();
+                inputs[index - 1].value = '';
+              }
+            } else {
+              input.value = '';
+            }
+            e.preventDefault();
+          }
+        });
+
+        // Clipboard paste handler
+        input.addEventListener('paste', (e) => {
+          const pasteData = (e.clipboardData || window.clipboardData).getData('text').trim();
+          if (pasteData.length === 6 && /^\d+$/.test(pasteData)) {
+            inputs.forEach((inp, idx) => {
+              inp.value = pasteData.charAt(idx);
+            });
+            inputs[5].focus();
+            e.preventDefault();
+          }
+        });
+      });
+    }
+
+    // OTP Timer countdown
+    function startOTPTimer(durationSeconds = 30) {
+      clearInterval(otpTimerInterval);
+      const resendBtn = document.getElementById('resend-otp-btn');
+      const timerDisplay = document.getElementById('otp-timer');
+      
+      resendBtn.setAttribute('disabled', 'true');
+      resendBtn.classList.add('opacity-50', 'cursor-not-allowed', 'pointer-events-none');
+      
+      let remaining = durationSeconds;
+      timerDisplay.innerText = `Resend in ${remaining}s`;
+
+      otpTimerInterval = setInterval(() => {
+        remaining--;
+        if (remaining <= 0) {
+          clearInterval(otpTimerInterval);
+          resendBtn.removeAttribute('disabled');
+          resendBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'pointer-events-none');
+          timerDisplay.innerText = 'Resend available';
+        } else {
+          timerDisplay.innerText = `Resend in ${remaining}s`;
+        }
+      }, 1000);
+    }
+
+    // Page Load Setup
+    document.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      setupOTPInputListeners();
+      
+      const session = sessionStorage.getItem('roadresq_session');
+      
+      if (session) {
+        const user = JSON.parse(session);
+        userName = user.name;
+        currentRole = user.role;
+        userEmail = user.email;
+        closeAuthContainer();
+        initApplication();
+      } else {
+        openAuthContainer();
+      }
+    });
+
+    // Dynamic Google Maps Script Loader
+    function loadGoogleMapsScript(callback) {
+      const oldScript = document.getElementById('gmaps-api-script');
+      if (oldScript) {
+        oldScript.remove();
+      }
+
+      window.onGoogleMapsLoaded = () => {
+        defineHTMLMarkerClass();
+        callback();
+      };
+
+      // Fetch the API key from backend dynamically
+      fetch('/api/config')
+        .then(res => res.json())
+        .then(config => {
+          const key = config.googleMapsApiKey || GOOGLE_MAPS_API_KEY;
+          const script = document.createElement('script');
+          script.id = 'gmaps-api-script';
+          script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&callback=onGoogleMapsLoaded`;
+          script.async = true;
+          script.defer = true;
+          script.onerror = () => {
+            showToast('Google Maps API failed to load.', 'error');
+          };
+          document.head.appendChild(script);
+        })
+        .catch(err => {
+          console.error('Failed to fetch Google Maps API key:', err);
+          const script = document.createElement('script');
+          script.id = 'gmaps-api-script';
+          script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&callback=onGoogleMapsLoaded`;
+          script.async = true;
+          script.defer = true;
+          script.onerror = () => {
+            showToast('Google Maps API failed to load.', 'error');
+          };
+          document.head.appendChild(script);
+        });
+    }
+
+    // Initialize Map and Socket
+    function initApplication() {
+      document.getElementById('user-display-name').innerText = userName;
+      document.getElementById('user-avatar').innerText = userName.charAt(0).toUpperCase();
+
+      // Display the user's role in the header badge
+      const roleBadge = document.getElementById('user-role-badge');
+      if (roleBadge) {
+        roleBadge.innerText = currentRole === 'customer' ? 'Customer' : 'Responder';
+        roleBadge.className = currentRole === 'customer' 
+          ? "text-[9px] font-bold uppercase tracking-wider text-brand-navy"
+          : "text-[9px] font-bold uppercase tracking-wider text-brand-orange";
+      }
+
+      // Hide role switcher wrapper since dashboards are restricted to user role (no cross-interference)
+      const switcher = document.getElementById('role-switcher-wrapper');
+      if (switcher) {
+        switcher.style.display = 'none';
+      }
+
+      setRole(currentRole);
+
+      loadGoogleMapsScript(() => {
+        initMap();
+        initSocket();
+      });
+    }
+
+    // Auth screen controls
+    function openAuthContainer() {
+      document.getElementById('auth-container').classList.remove('hidden');
+      document.getElementById('auth-container').classList.add('flex');
+    }
+    
+    function closeAuthContainer() {
+      document.getElementById('auth-container').classList.add('hidden');
+      document.getElementById('auth-container').classList.remove('flex');
+    }
+
+    function switchAuthTab(tab) {
+      currentAuthTab = tab;
+      const tabLogin = document.getElementById('tab-login-btn');
+      const tabSignup = document.getElementById('tab-signup-btn');
+      const loginForm = document.getElementById('login-form');
+      const signupForm = document.getElementById('signup-form');
+
+      if (tab === 'login') {
+        tabLogin.className = "py-2.5 text-xs font-bold rounded-lg bg-white text-slate-900 shadow-sm transition-all";
+        tabSignup.className = "py-2.5 text-xs font-bold rounded-lg text-slate-500 hover:text-slate-800 transition-all";
+        loginForm.classList.remove('hidden');
+        signupForm.classList.add('hidden');
+      } else {
+        tabSignup.className = "py-2.5 text-xs font-bold rounded-lg bg-white text-slate-900 shadow-sm transition-all";
+        tabLogin.className = "py-2.5 text-xs font-bold rounded-lg text-slate-500 hover:text-slate-800 transition-all";
+        signupForm.classList.remove('hidden');
+        loginForm.classList.add('hidden');
+      }
+    }
+
+    function selectRegRole(role) {
+      selectedRegRole = role;
+      const custBtn = document.getElementById('reg-role-customer');
+      const mechBtn = document.getElementById('reg-role-mechanic');
+      
+      if (role === 'customer') {
+        custBtn.classList.remove('bg-slate-50', 'border-transparent', 'text-slate-500');
+        custBtn.classList.add('border-brand-navy', 'text-brand-navy');
+        mechBtn.classList.add('bg-slate-50', 'border-transparent', 'text-slate-500');
+        mechBtn.classList.remove('border-brand-navy', 'text-brand-navy');
+      } else {
+        mechBtn.classList.remove('bg-slate-50', 'border-transparent', 'text-slate-500');
+        mechBtn.classList.add('border-brand-navy', 'text-brand-navy');
+        custBtn.classList.add('bg-slate-50', 'border-transparent', 'text-slate-500');
+        custBtn.classList.remove('border-brand-navy', 'text-brand-navy');
+      }
+    }
+
+    // Auth Submission Logic
+    async function handleLogin(event) {
+      event.preventDefault();
+      const email = document.getElementById('login-email').value;
+      const password = document.getElementById('login-password').value;
+
+      try {
+        const response = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+          if (data.status === 'otp_sent') {
+            showToast(data.message, 'success');
+            otpEmail = data.email;
+            
+            // UI Transition to OTP Entry
+            document.getElementById('otp-target-email').innerText = otpEmail;
+            
+            // Development Mode Helper
+            const devHint = document.getElementById('otp-dev-hint');
+            const devValue = document.getElementById('otp-dev-value');
+            const devLink = document.getElementById('otp-dev-preview-link');
+            if (data.otp) {
+              devValue.innerText = data.otp;
+              devHint.classList.remove('hidden');
+              devHint.classList.add('flex');
+              if (data.previewUrl) {
+                devLink.href = data.previewUrl;
+                devLink.classList.remove('hidden');
+              } else {
+                devLink.classList.add('hidden');
+              }
+            } else {
+              devHint.classList.add('hidden');
+              devHint.classList.remove('flex');
+            }
+
+            document.getElementById('login-form').classList.add('hidden');
+            document.getElementById('signup-form').classList.add('hidden');
+            document.getElementById('auth-tab-switches').classList.add('hidden');
+            
+            const otpForm = document.getElementById('otp-form');
+            otpForm.classList.remove('hidden');
+            otpForm.classList.add('flex');
+            
+            // Clear and focus the first input
+            const inputs = document.querySelectorAll('.otp-input');
+            inputs.forEach(inp => inp.value = '');
+            setTimeout(() => inputs[0].focus(), 50);
+            
+            startOTPTimer(30);
+          } else {
+            showToast('Login successful!', 'success');
+            sessionStorage.setItem('roadresq_session', JSON.stringify(data.user));
+            userName = data.user.name;
+            currentRole = data.user.role;
+            userEmail = data.user.email;
+            closeAuthContainer();
+            initApplication();
+          }
+        } else {
+          showToast(data.error || 'Authentication failed', 'error');
+        }
+      } catch (err) {
+        showToast('Server connection error.', 'error');
+      }
+    }
+
+    async function handleVerifyOTP(event) {
+      event.preventDefault();
+      const inputs = document.querySelectorAll('.otp-input');
+      let otpCode = '';
+      inputs.forEach(inp => otpCode += inp.value);
+
+      if (otpCode.length !== 6) {
+        showToast('Please enter a complete 6-digit passcode.', 'warning');
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/verify-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: otpEmail, otp: otpCode })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          showToast('Security verification successful!', 'success');
+          
+          sessionStorage.setItem('roadresq_session', JSON.stringify(data.user));
+          
+          userName = data.user.name;
+          currentRole = data.user.role;
+          userEmail = data.user.email;
+          
+          // Reset states and login
+          cancelOTPFlow();
+          closeAuthContainer();
+          initApplication();
+        } else {
+          showToast(data.error || 'Verification passcode invalid or expired.', 'error');
+          // Highlight error visually with a shake class or red borders
+          inputs.forEach(inp => {
+            inp.classList.add('border-red-500', 'bg-red-50');
+            setTimeout(() => {
+              inp.classList.remove('border-red-500', 'bg-red-50');
+            }, 1200);
+          });
+        }
+      } catch (err) {
+        showToast('Server connection error.', 'error');
+      }
+    }
+
+    async function handleResendOTP() {
+      try {
+        const response = await fetch('/api/resend-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: otpEmail })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          showToast(data.message || 'Passcode resent successfully.', 'success');
+          
+          // Development Mode Helper
+          const devHint = document.getElementById('otp-dev-hint');
+          const devValue = document.getElementById('otp-dev-value');
+          const devLink = document.getElementById('otp-dev-preview-link');
+          if (data.otp) {
+            devValue.innerText = data.otp;
+            devHint.classList.remove('hidden');
+            devHint.classList.add('flex');
+            if (data.previewUrl) {
+              devLink.href = data.previewUrl;
+              devLink.classList.remove('hidden');
+            } else {
+              devLink.classList.add('hidden');
+            }
+          } else {
+            devHint.classList.add('hidden');
+            devHint.classList.remove('flex');
+          }
+
+          const inputs = document.querySelectorAll('.otp-input');
+          inputs.forEach(inp => inp.value = '');
+          inputs[0].focus();
+          startOTPTimer(30);
+        } else {
+          showToast(data.error || 'Failed to resend passcode.', 'error');
+        }
+      } catch (err) {
+        showToast('Server connection error.', 'error');
+      }
+    }
+
+    function cancelOTPFlow() {
+      clearInterval(otpTimerInterval);
+      
+      document.getElementById('otp-form').classList.remove('flex');
+      document.getElementById('otp-form').classList.add('hidden');
+      
+      document.getElementById('auth-tab-switches').classList.remove('hidden');
+      document.getElementById('login-form').classList.remove('hidden');
+      
+      // Reset inputs
+      const inputs = document.querySelectorAll('.otp-input');
+      inputs.forEach(inp => inp.value = '');
+
+      // Hide development mode helper
+      const devHint = document.getElementById('otp-dev-hint');
+      if (devHint) {
+        devHint.classList.add('hidden');
+        devHint.classList.remove('flex');
+      }
+    }
+
+    async function handleSignUp(event) {
+      event.preventDefault();
+      const name = document.getElementById('register-name').value;
+      const email = document.getElementById('register-email').value;
+      const password = document.getElementById('register-password').value;
+      const phone = document.getElementById('register-phone').value;
+
+      try {
+        const response = await fetch('/api/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, password, role: selectedRegRole, phone })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+          showToast('Registration successful! Please login.', 'success');
+          switchAuthTab('login');
+          document.getElementById('login-email').value = email;
+          document.getElementById('login-password').value = password;
+        } else {
+          showToast(data.error || 'Registration failed', 'error');
+        }
+      } catch (err) {
+        showToast('Server connection error.', 'error');
+      }
+    }
+
+    function handleLogout() {
+      sessionStorage.removeItem('roadresq_session');
+      if (socket) {
+        socket.disconnect();
+      }
+      
+      clearAllMapMarkers();
+
+      userName = '';
+      currentRole = 'customer';
+      userEmail = '';
+      myLocation = null;
+
+      document.getElementById('login-email').value = '';
+      document.getElementById('login-password').value = '';
+      document.getElementById('register-name').value = '';
+      document.getElementById('register-email').value = '';
+      document.getElementById('register-password').value = '';
+      
+      const chatbotToggle = document.getElementById('chatbot-toggle-btn');
+      if (chatbotToggle) chatbotToggle.classList.add('hidden');
+      if (typeof closeChatbot === 'function') closeChatbot();
+
+      openAuthContainer();
+    }
+
+    function clearAllMapMarkers() {
+      if (myMarker) {
+        myMarker.setMap(null);
+        myMarker = null;
+      }
+      if (otherMarker) {
+        otherMarker.setMap(null);
+        otherMarker = null;
+      }
+      if (mapRouteLine) {
+        mapRouteLine.setMap(null);
+        mapRouteLine = null;
+      }
+      customerMechanicMarkers.forEach(m => m.setMap(null));
+      customerMechanicMarkers.clear();
+    }
+
+    // Role View Logic
+    function setRole(role) {
+      currentRole = role;
+      const custBtn = document.getElementById('toggle-customer');
+      const mechBtn = document.getElementById('toggle-mechanic');
+      
+      const custPanel = document.getElementById('customer-panel');
+      const mechPanel = document.getElementById('mechanic-panel');
+
+      const chatbotToggle = document.getElementById('chatbot-toggle-btn');
+
+      if (role === 'customer') {
+        custBtn.className = "px-4 py-1.5 rounded-full text-xs font-bold tracking-wide transition-all flex items-center gap-1.5 text-white bg-brand-navy shadow-sm";
+        mechBtn.className = "px-4 py-1.5 rounded-full text-xs font-bold tracking-wide transition-all flex items-center gap-1.5 text-slate-500 hover:text-slate-800";
+        
+        custPanel.classList.remove('hidden');
+        custPanel.classList.add('flex');
+        mechPanel.classList.add('hidden');
+        mechPanel.classList.remove('flex');
+
+        if (chatbotToggle) chatbotToggle.classList.remove('hidden');
+      } else {
+        mechBtn.className = "px-4 py-1.5 rounded-full text-xs font-bold tracking-wide transition-all flex items-center gap-1.5 text-white bg-brand-navy shadow-sm";
+        custBtn.className = "px-4 py-1.5 rounded-full text-xs font-bold tracking-wide transition-all flex items-center gap-1.5 text-slate-500 hover:text-slate-800";
+        
+        mechPanel.classList.remove('hidden');
+        mechPanel.classList.add('flex');
+        custPanel.classList.add('hidden');
+        custPanel.classList.remove('flex');
+
+        if (chatbotToggle) chatbotToggle.classList.add('hidden');
+        if (typeof closeChatbot === 'function') closeChatbot();
+      }
+
+      if (socket && socket.connected) {
+        socket.emit('register_user', { name: userName, role: currentRole, email: userEmail });
+        updateMapMarkers();
+      }
+    }
+
+    // Geolocation and Google Maps Setup (Light Styling)
+    function initMap() {
+      const defaultLat = 51.505;
+      const defaultLng = -0.09;
+      
+      myLocation = { lat: defaultLat, lng: defaultLng };
+
+      const mapOptions = {
+        zoom: 13,
+        center: new google.maps.LatLng(defaultLat, defaultLng),
+        disableDefaultUI: true,
+        zoomControl: true,
+        styles: lightMapStyle
+      };
+
+      map = new google.maps.Map(document.getElementById('map'), mapOptions);
+
+      // Handle map clicks to manually specify coordinates/simulate
+      map.addListener('click', (e) => {
+        myLocation = { lat: e.latLng.lat(), lng: e.latLng.lng() };
+        
+        updateMyLocationMarker();
+        updateGPSStatusDisplays();
+
+        if (socket && socket.connected) {
+          socket.emit('update_location', myLocation);
+          if (currentRole === 'customer') {
+            socket.emit('get_nearby_mechanics', myLocation);
+          }
+        }
+      });
+
+      updateMyLocationMarker();
+      detectLocation();
+    }
+
+    // Geolocation fetcher
+    function detectLocation() {
+      if (!navigator.geolocation) {
+        showToast('Geolocation is not supported by your browser', 'error');
+        return;
+      }
+
+      showToast('Locating your position...', 'info');
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          myLocation = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          };
+
+          if (map) {
+            map.setCenter(new google.maps.LatLng(myLocation.lat, myLocation.lng));
+            map.setZoom(14);
+          }
+          
+          updateMyLocationMarker();
+          updateGPSStatusDisplays();
+
+          if (socket && socket.connected) {
+            socket.emit('update_location', myLocation);
+            if (currentRole === 'customer') {
+              socket.emit('get_nearby_mechanics', myLocation);
+            }
+          }
+
+          showToast('GPS position synchronized!', 'success');
+        },
+        (error) => {
+          console.warn("GPS acquire error:", error.message);
+          showToast('GPS access denied. Tap map to select location manually.', 'info');
+          updateGPSStatusDisplays();
+        },
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+      );
+    }
+
+    function updateGPSStatusDisplays() {
+      const gpsDot = document.getElementById('gps-status-dot');
+      const gpsText = document.getElementById('gps-status-text');
+      const gpsCoords = document.getElementById('gps-coords-display');
+      
+      const mechGpsDot = document.getElementById('mech-gps-dot');
+      const mechGpsText = document.getElementById('mech-gps-text');
+      const mechGpsCoords = document.getElementById('mech-gps-coords');
+
+      const availabilityToggle = document.getElementById('availability-toggle');
+
+      if (myLocation) {
+        const coordString = `Lat: ${myLocation.lat.toFixed(5)}, Lng: ${myLocation.lng.toFixed(5)}`;
+        
+        if (gpsDot) gpsDot.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+        if (gpsText) {
+          gpsText.innerText = "GPS Acquired";
+          gpsText.className = "text-[11px] font-bold text-emerald-500";
+        }
+        if (gpsCoords) gpsCoords.innerText = coordString;
+
+        if (mechGpsDot) mechGpsDot.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+        if (mechGpsText) {
+          mechGpsText.innerText = "GPS Acquired";
+          mechGpsText.className = "text-[11px] font-bold text-emerald-500";
+        }
+        if (mechGpsCoords) mechGpsCoords.innerText = coordString;
+
+        if (availabilityToggle) availabilityToggle.removeAttribute('disabled');
+      }
+    }
+
+    // Marker styling and updating (High contrast pins)
+    function updateMyLocationMarker() {
+      if (!map || !myLocation) return;
+
+      // Customer: Pulsing blue dot, Mechanic: Wrench Pin
+      const html = currentRole === 'customer' 
+        ? `<div class="relative flex items-center justify-center w-8 h-8">
+             <span class="absolute inline-flex h-8 w-8 animate-ping rounded-full bg-blue-500 opacity-75"></span>
+             <span class="relative inline-flex rounded-full h-4.5 w-4.5 bg-blue-600 border-2 border-white shadow-md"></span>
+           </div>`
+        : `<div class="relative flex items-center justify-center w-9 h-9">
+             <span class="absolute inline-flex h-9 w-9 animate-pulse rounded-full bg-orange-400 opacity-60"></span>
+             <span class="relative inline-flex rounded-full h-7 w-7 bg-orange-500 border border-white shadow-lg flex items-center justify-center text-xs text-white">🛠️</span>
+           </div>`;
+
+      if (myMarker) {
+        myMarker.setLatLng(myLocation);
+      } else {
+        myMarker = new HTMLMarker(myLocation, map, html, (newLatLng) => {
+          myLocation = newLatLng;
+          updateGPSStatusDisplays();
+          
+          if (socket && socket.connected) {
+            socket.emit('update_location', myLocation);
+          }
+
+          if (activeAssistanceRequest) {
+            recalculateRouteAndDistance();
+          }
+        });
+      }
+    }
+
+    // Refresh display of markers on role switch or state changes
+    function updateMapMarkers() {
+      if (otherMarker) {
+        otherMarker.setMap(null);
+        otherMarker = null;
+      }
+      if (mapRouteLine) {
+        mapRouteLine.setMap(null);
+        mapRouteLine = null;
+      }
+      if (myMarker) {
+        myMarker.setMap(null);
+        myMarker = null;
+      }
+
+      updateMyLocationMarker();
+
+      // Clear general online mechanics pins if not customer mode
+      if (currentRole !== 'customer') {
+        customerMechanicMarkers.forEach(m => m.setMap(null));
+        customerMechanicMarkers.clear();
+      }
+
+      if (activeAssistanceRequest) {
+        let otherLoc = null;
+        let otherRole = '';
+
+        if (currentRole === 'customer') {
+          otherLoc = activeAssistanceRequest.mechanicLocation;
+          otherRole = 'mechanic';
+        } else {
+          otherLoc = activeAssistanceRequest.location;
+          otherRole = 'customer';
+        }
+
+        if (otherLoc) {
+          updateOtherMarker(otherRole, otherLoc);
+          drawRouteLine(myLocation, otherLoc);
+        }
+      }
+    }
+
+    function updateOtherMarker(role, location) {
+      if (!map || !location) return;
+
+      // Customer matched seeing Mechanic (Wrench pin), Mechanic seeing Customer (blue dot)
+      const html = role === 'customer' 
+        ? `<div class="relative flex items-center justify-center w-8 h-8">
+             <span class="absolute inline-flex h-8 w-8 animate-ping rounded-full bg-blue-500 opacity-75"></span>
+             <span class="relative inline-flex rounded-full h-4.5 w-4.5 bg-blue-600 border-2 border-white shadow-md"></span>
+           </div>`
+        : `<div class="relative flex items-center justify-center w-9 h-9">
+             <span class="absolute inline-flex h-9 w-9 animate-pulse rounded-full bg-orange-400 opacity-60"></span>
+             <span class="relative inline-flex rounded-full h-7 w-7 bg-orange-500 border border-white shadow-lg flex items-center justify-center text-xs text-white">🛠️</span>
+           </div>`;
+
+      if (otherMarker) {
+        otherMarker.setLatLng(location);
+      } else {
+        otherMarker = new HTMLMarker(location, map, html, null);
+      }
+    }
+
+    function drawRouteLine(start, end) {
+      if (!map || !start || !end) return;
+
+      const startLatLng = new google.maps.LatLng(start.lat, start.lng);
+      const endLatLng = new google.maps.LatLng(end.lat, end.lng);
+      const pathPoints = [startLatLng, endLatLng];
+
+      const lineSymbol = {
+        path: 'M 0,-1 0,1',
+        strokeOpacity: 1,
+        scale: 4
+      };
+
+      if (mapRouteLine) {
+        mapRouteLine.setPath(pathPoints);
+      } else {
+        mapRouteLine = new google.maps.Polyline({
+          path: pathPoints,
+          strokeColor: '#f97316', // Orange connecting route
+          strokeOpacity: 0,
+          icons: [{
+            icon: lineSymbol,
+            offset: '0',
+            repeat: '15px'
+          }],
+          map: map
+        });
+      }
+
+      const bounds = new google.maps.LatLngBounds();
+      bounds.extend(startLatLng);
+      bounds.extend(endLatLng);
+      map.fitBounds(bounds);
+    }
+
+    // Helper: Haversine distance
+    function getDistanceClient(lat1, lon1, lat2, lon2) {
+      if (lat1 === undefined || lon1 === undefined || lat2 === undefined || lon2 === undefined) return 0;
+      const R = 6371; // km
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+
+    function recalculateRouteAndDistance() {
+      if (!activeAssistanceRequest) return;
+
+      let distance = 0;
+      if (currentRole === 'customer') {
+        const mechLoc = activeAssistanceRequest.mechanicLocation;
+        if (mechLoc && myLocation) {
+          distance = getDistanceClient(myLocation.lat, myLocation.lng, mechLoc.lat, mechLoc.lng);
+          updateOtherMarker('mechanic', mechLoc);
+          drawRouteLine(myLocation, mechLoc);
+
+          // Update distance / arrival details dynamically
+          if (distance < 0.1) {
+            // Arrived!
+            const step3Ind = document.getElementById('step3-indicator');
+            if (step3Ind) {
+              step3Ind.className = "absolute -left-[30px] top-0 w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center text-[8px] text-white";
+              step3Ind.innerHTML = "✓";
+            }
+            const step3Title = document.getElementById('step3-title');
+            if (step3Title) step3Title.className = "text-emerald-600 font-bold";
+            const step3Desc = document.getElementById('step3-desc');
+            if (step3Desc) step3Desc.innerText = "Mechanic has arrived at your location!";
+
+            const matchedMechStatus = document.getElementById('matched-mech-status');
+            if (matchedMechStatus) {
+              matchedMechStatus.innerText = "Arrived";
+              matchedMechStatus.className = "px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 border border-emerald-200 text-[8px] font-bold uppercase";
+            }
+          } else {
+            // Still en route
+            const step3Ind = document.getElementById('step3-indicator');
+            if (step3Ind) {
+              step3Ind.className = "absolute -left-[30px] top-0 w-4 h-4 rounded-full bg-slate-200 border border-slate-300 flex items-center justify-center text-[8px] text-slate-600";
+              step3Ind.innerHTML = "3";
+            }
+            const step3Title = document.getElementById('step3-title');
+            if (step3Title) step3Title.className = "text-slate-500";
+            const step3Desc = document.getElementById('step3-desc');
+            if (step3Desc) step3Desc.innerText = `Awaiting arrival... (${distance.toFixed(2)} km away)`;
+
+            const matchedMechStatus = document.getElementById('matched-mech-status');
+            if (matchedMechStatus) {
+              matchedMechStatus.innerText = "En Route";
+              matchedMechStatus.className = "px-2 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200 text-[8px] font-bold uppercase";
+            }
+          }
+        }
+      } else {
+        const custLoc = activeAssistanceRequest.location;
+        if (custLoc && myLocation) {
+          distance = getDistanceClient(myLocation.lat, myLocation.lng, custLoc.lat, custLoc.lng);
+          updateOtherMarker('customer', custLoc);
+          drawRouteLine(myLocation, custLoc);
+
+          if (distance < 0.1) {
+            document.getElementById('active-job-distance').innerText = `${Math.round(distance * 1000)} m (Arrived)`;
+          } else {
+            document.getElementById('active-job-distance').innerText = `${distance.toFixed(2)} km`;
+          }
+        }
+      }
+    }
+
+    // Socket Setup and Operations
+    function initSocket() {
+      socket = io();
+
+      socket.on('connect', () => {
+        console.log("Socket Connected: ", socket.id);
+        socketId = socket.id;
+
+        socket.emit('register_user', { name: userName, role: currentRole, email: userEmail });
+
+        if (myLocation) {
+          socket.emit('update_location', myLocation);
+        }
+
+        // Sync availability toggle status on socket reconnect
+        if (currentRole === 'mechanic') {
+          const toggle = document.getElementById('availability-toggle');
+          if (toggle) {
+            socket.emit('toggle_mechanic_status', { isOnline: toggle.checked });
+          }
+        }
+      });
+
+      socket.on('register_success', (data) => {
+        console.log("Register complete.");
+      });
+
+      // Customer receives list updates of online mechanics
+      socket.on('nearby_mechanics_list', (mechanics) => {
+        if (currentRole !== 'customer') return;
+
+        customerMechanicMarkers.forEach((marker, mechSocketId) => {
+          const match = mechanics.find(m => m.socketId === mechSocketId);
+          if (!match || (activeAssistanceRequest && activeAssistanceRequest.mechanicSocketId === mechSocketId)) {
+            marker.setMap(null);
+            customerMechanicMarkers.delete(mechSocketId);
+          }
+        });
+
+        mechanics.forEach((mech) => {
+          if (!mech.location) return;
+          if (activeAssistanceRequest && activeAssistanceRequest.mechanicSocketId === mech.socketId) return;
+
+          if (mech.status === 'available') {
+            const html = `<div class="relative flex items-center justify-center w-8 h-8">
+                            <span class="absolute inline-flex h-6 w-6 animate-pulse rounded-full bg-orange-400 opacity-40"></span>
+                            <span class="relative inline-flex rounded-full h-5.5 w-5.5 bg-orange-500 border border-white shadow flex items-center justify-center text-[10px]">🛠️</span>
+                          </div>`;
+
+            if (customerMechanicMarkers.has(mech.socketId)) {
+              customerMechanicMarkers.get(mech.socketId).setLatLng(mech.location);
+            } else {
+              const marker = new HTMLMarker(mech.location, map, html, null);
+              customerMechanicMarkers.set(mech.socketId, marker);
+            }
+          } else {
+            if (customerMechanicMarkers.has(mech.socketId)) {
+              customerMechanicMarkers.get(mech.socketId).setMap(null);
+              customerMechanicMarkers.delete(mech.socketId);
+            }
+          }
+        });
+
+        const listDiv = document.getElementById('customer-mechs-list');
+        const badge = document.getElementById('mech-count-badge');
+        const emptyState = document.getElementById('mechs-empty-state');
+
+        listDiv.querySelectorAll('.mech-row').forEach(row => row.remove());
+
+        const onlineMechs = mechanics.filter(m => {
+          if (activeAssistanceRequest && activeAssistanceRequest.mechanicSocketId === m.socketId) {
+            return false;
+          }
+          return m.status === 'available' || m.status === 'busy';
+        });
+        badge.innerText = `${onlineMechs.length} Online`;
+
+        if (onlineMechs.length === 0) {
+          emptyState.classList.remove('hidden');
+          return;
+        }
+
+        emptyState.classList.add('hidden');
+
+        onlineMechs.forEach((mech) => {
+          const row = document.createElement('div');
+          row.className = "mech-row flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs";
+          
+          let distStr = 'calculating...';
+          if (mech.distance !== undefined && mech.distance !== null) {
+            distStr = `${mech.distance.toFixed(2)} km`;
+          } else if (myLocation && mech.location) {
+            const dist = getDistanceClient(myLocation.lat, myLocation.lng, mech.location.lat, mech.location.lng);
+            distStr = `${dist.toFixed(2)} km`;
+          }
+
+          const statusBadge = mech.status === 'available' 
+            ? `<span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 border border-emerald-200 text-[9px] font-bold uppercase">Available</span>`
+            : `<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200 text-[9px] font-bold uppercase">Busy</span>`;
+
+          row.innerHTML = `
+            <div class="flex items-center gap-2">
+              <span class="text-base">👷</span>
+              <div class="text-left">
+                <p class="font-bold text-slate-800">${mech.name}</p>
+                <p class="text-[10px] text-slate-400">Distance: ${distStr}</p>
+                <p class="text-[10px] text-slate-500 font-semibold mt-0.5">📞 ${mech.phone}</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              ${statusBadge}
+              <a href="tel:${mech.phone}" class="w-8 h-8 bg-brand-navy hover:bg-brand-navyHover text-white rounded-lg flex items-center justify-center shadow-sm transition active:scale-90">
+                <i data-lucide="phone" class="w-3.5 h-3.5"></i>
+              </a>
+            </div>
+          `;
+          listDiv.appendChild(row);
+        });
+
+        // Re-initialize dynamic icons
+        lucide.createIcons();
+      });
+
+      // Customer: Job Accepted (Mechanic Assigned)
+      socket.on('mechanic_assigned', (data) => {
+        playNotificationSound();
+        showToast(`${data.mechanicName} accepted your request and is en route!`, 'success');
+        
+        activeAssistanceRequest = {
+          id: data.requestId,
+          status: 'accepted',
+          mechanicName: data.mechanicName,
+          mechanicPhone: data.mechanicPhone || 'Not Provided',
+          mechanicLocation: data.mechanicLocation,
+          mechanicSocketId: data.mechanicSocketId
+        };
+
+        // Transition Customer UI (Live Tracking Overlay State)
+        document.getElementById('tracking-status-title').innerText = "Mechanic Dispatched";
+        document.getElementById('tracking-status-desc').innerText = `${data.mechanicName} is navigating to your breakdown location.`;
+        
+        const step2Ind = document.getElementById('step2-indicator');
+        step2Ind.className = "absolute -left-[30px] top-0 w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center text-[8px] text-white";
+        step2Ind.innerHTML = "✓";
+        document.getElementById('step2-title').className = "text-emerald-600 font-bold";
+        document.getElementById('step2-desc').innerText = `${data.mechanicName} En Route`;
+
+        document.getElementById('matched-mechanic-card').classList.remove('hidden');
+        document.getElementById('matched-mech-name').innerText = data.mechanicName;
+        document.getElementById('matched-mech-phone').innerText = `📞 ${data.mechanicPhone || 'Not Provided'}`;
+        
+        const phoneLink = document.getElementById('matched-mech-phone-link');
+        if (phoneLink) {
+          phoneLink.setAttribute('href', `tel:${data.mechanicPhone || ''}`);
+        }
+
+        recalculateRouteAndDistance();
+        updateMapMarkers();
+        lucide.createIcons();
+      });
+
+      // Customer: Mechanic updated location
+      socket.on('mechanic_location_updated', (location) => {
+        if (activeAssistanceRequest && currentRole === 'customer') {
+          activeAssistanceRequest.mechanicLocation = location;
+          recalculateRouteAndDistance();
+        }
+      });
+
+      // Mechanic: Customer updated location
+      socket.on('customer_location_updated', (location) => {
+        if (activeAssistanceRequest && currentRole === 'mechanic') {
+          activeAssistanceRequest.location = location;
+          recalculateRouteAndDistance();
+        }
+      });
+
+      // Customer: Mechanic cancelled job mid-rescue
+      socket.on('mechanic_cancelled', (data) => {
+        playNotificationSound();
+        showToast('Mechanic cancelled the request. Searching for another responder...', 'warning');
+
+        activeAssistanceRequest.status = 'pending';
+        activeAssistanceRequest.mechanicName = null;
+        activeAssistanceRequest.mechanicLocation = null;
+
+        document.getElementById('tracking-status-title').innerText = "Searching for Responder";
+        document.getElementById('tracking-status-desc').innerText = "Broadcasting emergency coordinates...";
+        
+        const step2Ind = document.getElementById('step2-indicator');
+        step2Ind.className = "absolute -left-[30px] top-0 w-4 h-4 rounded-full bg-slate-200 border border-slate-300 flex items-center justify-center text-[8px] text-slate-600";
+        step2Ind.innerHTML = "2";
+        document.getElementById('step2-title').className = "text-slate-500";
+        document.getElementById('step2-desc').innerText = "Awaiting matching...";
+
+        document.getElementById('matched-mechanic-card').classList.add('hidden');
+
+        updateMapMarkers();
+      });
+
+      // Mechanic/Customer: Job completed
+      socket.on('job_completed', (data) => {
+        playNotificationSound();
+        showToast('Roadside emergency rescue completed successfully!', 'success');
+        
+        activeAssistanceRequest = null;
+        
+        if (currentRole === 'customer') {
+          document.getElementById('request-tracking-container').classList.add('hidden');
+          document.getElementById('request-form-container').classList.remove('hidden');
+        } else {
+          isMechanicOnline = true;
+          document.getElementById('availability-toggle').checked = true;
+          document.getElementById('mechanic-status-desc').innerText = "Status: ONLINE & AVAILABLE";
+          
+          document.getElementById('mech-active-job-container').classList.add('hidden');
+          document.getElementById('mech-available-jobs-container').classList.remove('hidden');
+        }
+
+        updateMapMarkers();
+      });
+
+      // Customer session recovery
+      socket.on('active_request_restored', (data) => {
+        console.log("[Session Recovery] Restoring active request:", data);
+        activeAssistanceRequest = data;
+
+        document.getElementById('request-form-container').classList.add('hidden');
+        document.getElementById('request-tracking-container').classList.remove('hidden');
+
+        const now = new Date(data.timestamp || Date.now());
+        const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        document.getElementById('tracking-step1-time').innerText = timeStr;
+
+        if (data.status === 'pending') {
+          document.getElementById('tracking-status-title').innerText = "Broadcasting Request";
+          document.getElementById('tracking-status-desc').innerText = "Searching for nearby responders...";
+          
+          const step2Ind = document.getElementById('step2-indicator');
+          if (step2Ind) {
+            step2Ind.className = "absolute -left-[30px] top-0 w-4 h-4 rounded-full bg-slate-200 border border-slate-300 flex items-center justify-center text-[8px] text-slate-600";
+            step2Ind.innerHTML = "2";
+          }
+          const step2Title = document.getElementById('step2-title');
+          if (step2Title) step2Title.className = "text-slate-500";
+          const step2Desc = document.getElementById('step2-desc');
+          if (step2Desc) step2Desc.innerText = "Awaiting matching...";
+          
+          document.getElementById('matched-mechanic-card').classList.add('hidden');
+        } else if (data.status === 'accepted') {
+          document.getElementById('tracking-status-title').innerText = "Mechanic Dispatched";
+          document.getElementById('tracking-status-desc').innerText = `${data.mechanicName} is navigating to your breakdown location.`;
+          
+          const step2Ind = document.getElementById('step2-indicator');
+          if (step2Ind) {
+            step2Ind.className = "absolute -left-[30px] top-0 w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center text-[8px] text-white";
+            step2Ind.innerHTML = "✓";
+          }
+          const step2Title = document.getElementById('step2-title');
+          if (step2Title) step2Title.className = "text-emerald-600 font-bold";
+          const step2Desc = document.getElementById('step2-desc');
+          if (step2Desc) step2Desc.innerText = `${data.mechanicName} En Route`;
+
+          document.getElementById('matched-mechanic-card').classList.remove('hidden');
+          document.getElementById('matched-mech-name').innerText = data.mechanicName;
+          document.getElementById('matched-mech-phone').innerText = `📞 ${data.mechanicPhone || 'Not Provided'}`;
+          
+          const phoneLink = document.getElementById('matched-mech-phone-link');
+          if (phoneLink) {
+            phoneLink.setAttribute('href', `tel:${data.mechanicPhone || ''}`);
+          }
+        }
+        
+        recalculateRouteAndDistance();
+        updateMapMarkers();
+        lucide.createIcons();
+      });
+
+      // Mechanic session recovery
+      socket.on('active_job_restored', (job) => {
+        console.log("[Session Recovery] Restoring active job:", job);
+        activeAssistanceRequest = job;
+        
+        document.getElementById('mech-available-jobs-container').classList.add('hidden');
+        document.getElementById('mech-active-job-container').classList.remove('hidden');
+        document.getElementById('availability-toggle').checked = true;
+        document.getElementById('mechanic-status-desc').innerText = "Status: ONLINE & AVAILABLE";
+
+        document.getElementById('active-job-cust-name').innerText = job.customerName;
+        document.getElementById('active-job-vehicle').innerText = job.vehicleType;
+        document.getElementById('active-job-desc').innerText = job.description;
+        
+        recalculateRouteAndDistance();
+        updateMapMarkers();
+        lucide.createIcons();
+      });
+
+      // Mechanic/Customer: Job Cancelled ack
+      socket.on('job_cancelled_ack', (data) => {
+        showToast('Emergency rescue cancelled.', 'info');
+        activeAssistanceRequest = null;
+
+        if (currentRole === 'customer') {
+          document.getElementById('request-tracking-container').classList.add('hidden');
+          document.getElementById('request-form-container').classList.remove('hidden');
+        } else {
+          document.getElementById('mech-active-job-container').classList.add('hidden');
+          document.getElementById('mech-available-jobs-container').classList.remove('hidden');
+        }
+        updateMapMarkers();
+      });
+
+      // Mechanic: Job was cancelled by customer
+      socket.on('job_cancelled_by_customer', (data) => {
+        playNotificationSound();
+        showToast('The customer cancelled the assistance request.', 'warning');
+        
+        activeAssistanceRequest = null;
+
+        document.getElementById('mech-active-job-container').classList.add('hidden');
+        document.getElementById('mech-available-jobs-container').classList.remove('hidden');
+
+        updateMapMarkers();
+      });
+
+      // Mechanic: Receive all pending jobs
+      socket.on('available_jobs', (jobs) => {
+        availableJobs = jobs;
+        renderJobsList();
+      });
+
+      // Mechanic: Individual incoming request (Urgent Modal Popup)
+      socket.on('new_breakdown_request', (job) => {
+        playNotificationSound();
+        
+        // Add job to the dashboard list so it appears in the queue
+        const exists = availableJobs.find(j => j.id === job.id);
+        if (!exists) {
+          availableJobs.push(job);
+          renderJobsList();
+        }
+
+        // Populate modal details
+        pendingAlertRequest = job;
+        document.getElementById('incoming-alert-name').innerText = job.customerName;
+        document.getElementById('incoming-alert-vehicle').innerText = job.vehicleType;
+        document.getElementById('incoming-alert-description').innerText = job.description;
+        
+        const now = new Date();
+        const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        document.getElementById('incoming-alert-time').innerText = `Received at ${timeStr}`;
+
+        let distDisplay = "Calculating...";
+        if (job.distance !== null && job.distance !== undefined) {
+          distDisplay = `${job.distance} km away`;
+        } else if (myLocation && job.location) {
+          const clientDist = getDistanceClient(myLocation.lat, myLocation.lng, job.location.lat, job.location.lng);
+          distDisplay = `${clientDist.toFixed(2)} km away`;
+        }
+        document.getElementById('incoming-alert-distance').innerText = distDisplay;
+
+        // Open Modal
+        const modal = document.getElementById('incoming-alert-modal');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+      });
+
+      // Mechanic: Remove job from list
+      socket.on('job_taken', (data) => {
+        // If alerting request is taken, close alert modal
+        if (pendingAlertRequest && pendingAlertRequest.id === data.requestId) {
+          closeAlertModal();
+        }
+
+        availableJobs = availableJobs.filter(x => x.id !== data.requestId);
+        renderJobsList();
+      });
+
+      // Mechanic: Confirms job successfully assigned to me
+      socket.on('job_assigned', (job) => {
+        showToast('Rescue operation assigned to you! Drive safely.', 'success');
+        activeAssistanceRequest = job;
+        
+        document.getElementById('mech-available-jobs-container').classList.add('hidden');
+        document.getElementById('mech-active-job-container').classList.remove('hidden');
+
+        document.getElementById('active-job-cust-name').innerText = job.customerName;
+        document.getElementById('active-job-vehicle').innerText = job.vehicleType;
+        document.getElementById('active-job-desc').innerText = job.description;
+        
+        const dist = myLocation ? getDistanceClient(myLocation.lat, myLocation.lng, job.location.lat, job.location.lng) : 0;
+        document.getElementById('active-job-distance').innerText = `${dist.toFixed(2)} km`;
+
+        updateMapMarkers();
+      });
+
+      socket.on('request_error', (data) => {
+        showToast(data.message, 'error');
+      });
+
+      socket.on('accept_error', (data) => {
+        showToast(data.message, 'error');
+      });
+      
+      socket.on('disconnect', () => {
+        console.warn("Socket disconnected.");
+      });
+    }
+
+    // Urgent Alert Modal Controls
+    function closeAlertModal() {
+      const modal = document.getElementById('incoming-alert-modal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+      pendingAlertRequest = null;
+    }
+
+    function declineAlertJob() {
+      if (pendingAlertRequest) {
+        // Filter out of list locally so it doesn't prompt again
+        availableJobs = availableJobs.filter(x => x.id !== pendingAlertRequest.id);
+        renderJobsList();
+      }
+      closeAlertModal();
+      showToast('Emergency call declined.', 'info');
+    }
+
+    function acceptAlertJob() {
+      if (pendingAlertRequest) {
+        socket.emit('accept_job', { requestId: pendingAlertRequest.id });
+        closeAlertModal();
+      }
+    }
+
+    // Customer Form functions
+    function selectVehicle(type) {
+      selectedVehicle = type;
+      const carBtn = document.getElementById('vehicle-car-btn');
+      const bikeBtn = document.getElementById('vehicle-bike-btn');
+
+      if (type === 'Car') {
+        carBtn.className = "py-3.5 px-4 rounded-xl border-2 border-brand-orange bg-orange-50/50 text-brand-orange font-bold flex items-center justify-center gap-2 transition duration-300";
+        bikeBtn.className = "py-3.5 px-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-500 font-bold flex items-center justify-center gap-2 transition duration-300";
+      } else {
+        bikeBtn.className = "py-3.5 px-4 rounded-xl border-2 border-brand-orange bg-orange-50/50 text-brand-orange font-bold flex items-center justify-center gap-2 transition duration-300";
+        carBtn.className = "py-3.5 px-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-500 font-bold flex items-center justify-center gap-2 transition duration-300";
+      }
+    }
+
+    function applyPreset(text) {
+      document.getElementById('request-description').value = text;
+    }
+
+    function submitRequest() {
+      if (!myLocation) {
+        showToast('Please detect your current location first!', 'error');
+        return;
+      }
+
+      const description = document.getElementById('request-description').value.trim();
+      if (!description) {
+        showToast('Please describe the breakdown issue.', 'error');
+        return;
+      }
+
+      document.getElementById('request-form-container').classList.add('hidden');
+      document.getElementById('request-tracking-container').classList.remove('hidden');
+
+      const now = new Date();
+      const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      document.getElementById('tracking-step1-time').innerText = timeStr;
+
+      const step2Ind = document.getElementById('step2-indicator');
+      step2Ind.className = "absolute -left-[30px] top-0 w-4 h-4 rounded-full bg-slate-200 border border-slate-300 flex items-center justify-center text-[8px] text-slate-600";
+      step2Ind.innerHTML = "2";
+      document.getElementById('step2-title').className = "text-slate-500";
+      document.getElementById('step2-desc').innerText = "Awaiting matching...";
+      document.getElementById('matched-mechanic-card').classList.add('hidden');
+
+      socket.emit('request_help', {
+        vehicleType: selectedVehicle,
+        description: description,
+        location: myLocation
+      });
+
+      activeAssistanceRequest = {
+        status: 'pending',
+        location: myLocation,
+        vehicleType: selectedVehicle,
+        description: description
+      };
+      
+      showToast('Broadcasting emergency rescue request...', 'warning');
+    }
+
+    function cancelRequest() {
+      if (activeAssistanceRequest && activeAssistanceRequest.id) {
+        socket.emit('cancel_job', { requestId: activeAssistanceRequest.id });
+      } else {
+        document.getElementById('request-tracking-container').classList.add('hidden');
+        document.getElementById('request-form-container').classList.remove('hidden');
+        activeAssistanceRequest = null;
+        updateMapMarkers();
+      }
+    }
+
+    // Share Location SOS Action
+    function shareSOSLocation() {
+      if (myLocation) {
+        const url = `https://www.google.com/maps?q=${myLocation.lat},${myLocation.lng}`;
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(url).then(() => {
+            showToast('Breakdown location URL copied to clipboard! Share it with friends or emergency responders.', 'success');
+          });
+        } else {
+          showToast(`Breakdown Location Coords: Lat: ${myLocation.lat.toFixed(5)}, Lng: ${myLocation.lng.toFixed(5)}`, 'success');
+        }
+      }
+    }
+
+    // Mechanic status control
+    function toggleMechanicStatus() {
+      const toggle = document.getElementById('availability-toggle');
+      isMechanicOnline = toggle.checked;
+
+      const desc = document.getElementById('mechanic-status-desc');
+      if (isMechanicOnline) {
+        desc.innerText = "Status: ONLINE & AVAILABLE";
+        desc.className = "text-[10px] text-emerald-600 font-bold";
+      } else {
+        desc.innerText = "Status: OFFLINE";
+        desc.className = "text-[10px] text-slate-400 font-semibold";
+        
+        availableJobs = [];
+        renderJobsList();
+      }
+
+      socket.emit('toggle_mechanic_status', { isOnline: isMechanicOnline });
+    }
+
+    // Render list of emergency calls
+    function renderJobsList() {
+      const list = document.getElementById('mech-jobs-list');
+      const countBadge = document.getElementById('job-count-badge');
+      const emptyState = document.getElementById('jobs-empty-state');
+      
+      countBadge.innerText = availableJobs.length;
+
+      const cards = list.querySelectorAll('.job-card');
+      cards.forEach(card => card.remove());
+
+      if (availableJobs.length === 0) {
+        emptyState.classList.remove('hidden');
+        return;
+      }
+
+      emptyState.classList.add('hidden');
+
+      availableJobs.forEach((job) => {
+        const card = document.createElement('div');
+        card.className = "job-card p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col gap-3 transition hover:border-slate-350 animate-zoomIn shadow-sm";
+        
+        let distDisplay = "Unavailable";
+        if (job.distance !== null && job.distance !== undefined) {
+          distDisplay = `${job.distance} km`;
+        } else if (myLocation && job.location) {
+          const clientDist = getDistanceClient(myLocation.lat, myLocation.lng, job.location.lat, job.location.lng);
+          distDisplay = `${clientDist.toFixed(2)} km`;
+        }
+
+        card.innerHTML = `
+          <div class="flex items-start justify-between">
+            <div class="flex gap-2.5 items-center">
+              <span class="w-8 h-8 rounded-lg bg-orange-500/10 border border-brand-orange/20 flex items-center justify-center text-xs">
+                ${job.vehicleType === 'Car' ? '🚗' : '🏍️'}
+              </span>
+              <div>
+                <h4 class="text-xs font-bold text-slate-800">${job.customerName}</h4>
+                <p class="text-[10px] text-slate-400">${job.vehicleType} Emergency Dispatch</p>
+              </div>
+            </div>
+            <span class="px-2 py-0.5 rounded bg-orange-500/10 text-brand-orange border border-brand-orange/25 text-[9px] font-bold">
+              ${distDisplay}
+            </span>
+          </div>
+          <p class="text-xs text-slate-600 leading-relaxed font-semibold bg-white p-2.5 rounded-xl border border-slate-100">
+            ${job.description}
+          </p>
+          <div class="grid grid-cols-2 gap-2 mt-1">
+            <button onclick="acceptJob('${job.id}')" class="py-2.5 bg-brand-orange hover:bg-brand-orangeHover text-white font-bold rounded-lg text-[10px] uppercase tracking-wider transition">
+              Accept Rescue
+            </button>
+            <button onclick="viewJobLocation(${job.location.lat}, ${job.location.lng})" class="py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-lg text-[10px] uppercase tracking-wider transition">
+              View on Map
+            </button>
+          </div>
+        `;
+        list.appendChild(card);
+      });
+    }
+
+    function viewJobLocation(lat, lng) {
+      if (map) {
+        map.setCenter(new google.maps.LatLng(lat, lng));
+        map.setZoom(15);
+        showToast('Viewing request coordinates on map', 'info');
+      }
+    }
+
+    function acceptJob(requestId) {
+      socket.emit('accept_job', { requestId });
+    }
+
+    function completeActiveJob() {
+      if (activeAssistanceRequest) {
+        socket.emit('complete_job', { requestId: activeAssistanceRequest.id });
+      }
+    }
+
+    function cancelActiveJob() {
+      if (activeAssistanceRequest) {
+        if (confirm("Are you sure you want to cancel this operations?")) {
+          socket.emit('cancel_job', { requestId: activeAssistanceRequest.id });
+        }
+      }
+    }
+
+    // Toast System (Light Mode Styling)
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      if (!container) return;
+
+      const toast = document.createElement('div');
+      toast.className = `p-4 rounded-xl border flex items-center gap-3 shadow-lg transform translate-y-2 opacity-0 transition-all duration-300 pointer-events-auto bg-white`;
+
+      let icon = 'info';
+      let borderClass = 'border-slate-200';
+      let iconColor = 'text-brand-navy';
+
+      if (type === 'success') {
+        icon = 'check-circle2';
+        borderClass = 'border-emerald-200';
+        iconColor = 'text-emerald-500';
+      } else if (type === 'warning') {
+        icon = 'alert-circle';
+        borderClass = 'border-brand-orange/20';
+        iconColor = 'text-brand-orange';
+      } else if (type === 'error') {
+        icon = 'x-circle';
+        borderClass = 'border-red-200';
+        iconColor = 'text-red-500';
+      }
+
+      toast.classList.add(borderClass);
+      
+      toast.innerHTML = `
+        <div class="${iconColor} shrink-0">
+          <i data-lucide="${icon}" class="w-5 h-5"></i>
+        </div>
+        <p class="text-xs font-bold text-slate-700">${message}</p>
+      `;
+
+      container.appendChild(toast);
+      lucide.createIcons();
+
+      setTimeout(() => {
+        toast.classList.remove('translate-y-2', 'opacity-0');
+      }, 50);
+
+      setTimeout(() => {
+        toast.classList.add('translate-y-2', 'opacity-0');
+        setTimeout(() => {
+          toast.remove();
+        }, 300);
+      }, 4500);
+    }
+
+    function playNotificationSound() {
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        const osc1 = audioCtx.createOscillator();
+        const gain1 = audioCtx.createGain();
+        osc1.connect(gain1);
+        gain1.connect(audioCtx.destination);
+        osc1.type = 'sine';
+        osc1.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
+        gain1.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain1.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+        osc1.start(audioCtx.currentTime);
+        osc1.stop(audioCtx.currentTime + 0.3);
+        
+        const osc2 = audioCtx.createOscillator();
+        const gain2 = audioCtx.createGain();
+        osc2.connect(gain2);
+        gain2.connect(audioCtx.destination);
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.15); // E5
+        gain2.gain.setValueAtTime(0.15, audioCtx.currentTime + 0.15);
+        gain2.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.45);
+        osc2.start(audioCtx.currentTime + 0.15);
+        osc2.stop(audioCtx.currentTime + 0.45);
+      } catch (e) {
+        console.warn("Chime blocked by browser interaction requirements:", e.message);
+      }
+    }
+
+    // ========================================================
+    // Emergency Assistance Chatbot (Gemini AI Integration)
+    // ========================================================
+
+    const chatbotToggleBtn = document.getElementById('chatbot-toggle-btn');
+    const chatbotWindow = document.getElementById('chatbot-window');
+    const chatbotCloseBtn = document.getElementById('chatbot-close-btn');
+    const chatbotForm = document.getElementById('chatbot-form');
+    const chatbotInput = document.getElementById('chatbot-input');
+    const chatbotMessages = document.getElementById('chatbot-messages');
+    const chatbotTyping = document.getElementById('chatbot-typing');
+
+    chatbotToggleBtn.addEventListener('click', () => {
+      if (chatbotWindow.classList.contains('hidden')) {
+        chatbotWindow.classList.remove('hidden');
+        setTimeout(() => {
+          chatbotWindow.classList.remove('scale-95', 'translate-y-4', 'opacity-0');
+          chatbotWindow.classList.add('scale-100', 'translate-y-0', 'opacity-100');
+        }, 10);
+      } else {
+        closeChatbot();
+      }
+    });
+
+    chatbotCloseBtn.addEventListener('click', closeChatbot);
+
+    function closeChatbot() {
+      if (!chatbotWindow.classList.contains('hidden')) {
+        chatbotWindow.classList.remove('scale-100', 'translate-y-0', 'opacity-100');
+        chatbotWindow.classList.add('scale-95', 'translate-y-4', 'opacity-0');
+        setTimeout(() => {
+          chatbotWindow.classList.add('hidden');
+        }, 300);
+      }
+    }
+
+    function sendChatbotPreset(text) {
+      if (chatbotInput) {
+        chatbotInput.value = text;
+        handleChatbotSubmit(new Event('submit'));
+      }
+    }
+
+    chatbotForm.addEventListener('submit', handleChatbotSubmit);
+
+    async function handleChatbotSubmit(event) {
+      event.preventDefault();
+      const text = chatbotInput.value.trim();
+      if (!text) return;
+
+      chatbotInput.value = '';
+      appendChatMessage(text, 'user');
+      
+      // Show typing indicator
+      chatbotTyping.classList.remove('hidden');
+      chatbotMessages.scrollTop = chatbotMessages.scrollHeight;
+
+      const reply = await callGeminiAPI(text);
+
+      chatbotTyping.classList.add('hidden');
+      appendChatMessage(reply, 'bot');
+    }
+
+    function formatMarkdown(text) {
+      // Basic bold formatting
+      text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      // Basic italic formatting
+      text = text.replace(/\*(.*?)\*/g, '<em>$1</em>');
+      // Basic bullet points
+      text = text.replace(/^\s*[\-\*]\s+(.*)$/gm, '<li class="ml-4 list-disc text-left">$1</li>');
+      // Line breaks
+      text = text.replace(/\n/g, '<br>');
+      return text;
+    }
+
+    function appendChatMessage(text, sender) {
+      const msgDiv = document.createElement('div');
+      msgDiv.className = `flex gap-2 text-xs ${sender === 'user' ? 'justify-end' : ''}`;
+      
+      const formattedText = formatMarkdown(text);
+
+      if (sender === 'user') {
+        msgDiv.innerHTML = `
+          <div class="bg-brand-navy text-white p-3 rounded-2xl rounded-tr-none shadow-sm max-w-[80%] text-left font-medium leading-relaxed">
+            ${formattedText}
+          </div>
+        `;
+      } else {
+        msgDiv.innerHTML = `
+          <div class="w-7 h-7 rounded-lg bg-orange-500 text-white flex items-center justify-center font-bold text-[10px] shadow-sm flex-shrink-0">🤖</div>
+          <div class="bg-white border border-slate-200 text-slate-800 p-3 rounded-2xl rounded-tl-none shadow-sm max-w-[80%] text-left font-medium leading-relaxed">
+            ${formattedText}
+          </div>
+        `;
+      }
+
+      chatbotMessages.appendChild(msgDiv);
+      chatbotMessages.scrollTop = chatbotMessages.scrollHeight;
+    }
+
+    async function callGeminiAPI(messageText) {
+      try {
+        const response = await fetch('/api/chatbot', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ message: messageText })
+        });
+
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.text || "I received your question but couldn't construct a safety recommendation.";
+      } catch (error) {
+        console.error("Gemini API call failed:", error);
+        return "I'm sorry, I'm having trouble connecting to my brain right now. Please prioritize your safety and call professional rescue support if needed.";
+      }
+    }
+  </script>
+</body>
+</html>
