@@ -188,7 +188,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Connect to MongoDB
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/roadresq';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/RoadResQ';
 console.log(`[DB] Connecting to MongoDB at ${MONGODB_URI}...`);
 mongoose.connect(MONGODB_URI)
   .then(() => {
