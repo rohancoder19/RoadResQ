@@ -4,6 +4,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const nodemailer = require('nodemailer');
+const mongoose = require('mongoose');
 
 const app = express();
 const server = http.createServer(app);
@@ -186,27 +187,118 @@ app.use(express.json());
 // Serve static files from 'public' directory
 app.use(express.static(path.join(__dirname, 'public')));
 
-// In-memory mock database
-const registeredUsers = new Map(); // email (lowercase) -> UserObject { name, email, password, role, phone }
+// Connect to MongoDB
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/roadresq';
+console.log(`[DB] Connecting to MongoDB at ${MONGODB_URI}...`);
+mongoose.connect(MONGODB_URI)
+  .then(() => {
+    console.log('[DB] Successfully connected to MongoDB.');
+    seedMockAccounts();
+    loadActiveRequests();
+  })
+  .catch(err => {
+    console.error('[DB] Connection error:', err.message);
+  });
+
+// MongoDB Schemas & Models
+const userSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+  password: { type: String, required: true },
+  phone: { type: String, required: true },
+  role: { type: String, required: true, enum: ['customer', 'mechanic'] },
+  createdAt: { type: Date, default: Date.now }
+});
+
+const User = mongoose.model('User', userSchema);
+
+const rescueRequestSchema = new mongoose.Schema({
+  requestId: { type: String, required: true, unique: true },
+  customerName: { type: String, required: true },
+  customerEmail: { type: String, required: true },
+  customerPhone: { type: String },
+  location: {
+    lat: { type: Number, required: true },
+    lng: { type: Number, required: true }
+  },
+  vehicleType: { type: String, default: 'Car' },
+  description: { type: String, default: 'Roadside Emergency' },
+  status: { type: String, default: 'pending', enum: ['pending', 'accepted', 'completed', 'cancelled'] },
+  mechanicName: { type: String },
+  mechanicEmail: { type: String },
+  mechanicPhone: { type: String },
+  mechanicLocation: {
+    lat: { type: Number },
+    lng: { type: Number }
+  },
+  createdAt: { type: Date, default: Date.now }
+});
+
+const RescueRequest = mongoose.model('RescueRequest', rescueRequestSchema);
+
+// Seeding Mock Accounts
+async function seedMockAccounts() {
+  try {
+    const customerExists = await User.findOne({ email: 'customer@resq.com' });
+    if (!customerExists) {
+      await User.create({
+        name: 'Alice Customer',
+        email: 'customer@resq.com',
+        password: 'password123',
+        phone: '+1 (555) 019-2834',
+        role: 'customer'
+      });
+      console.log('[DB] Seeded Alice Customer mock account.');
+    }
+    const mechanicExists = await User.findOne({ email: 'mechanic@resq.com' });
+    if (!mechanicExists) {
+      await User.create({
+        name: 'Bob Mechanic',
+        email: 'mechanic@resq.com',
+        password: 'password123',
+        phone: '+1 (555) 014-9988',
+        role: 'mechanic'
+      });
+      console.log('[DB] Seeded Bob Mechanic mock account.');
+    }
+  } catch (err) {
+    console.error('[DB] Seeding mock accounts failed:', err.message);
+  }
+}
+
+// In-memory runtime session maps
 const activeRequests = new Map(); // requestId -> RequestObject
 const onlineMechanics = new Map(); // socketId -> MechanicObject
 const connectedUsers = new Map(); // socketId -> UserSessionObject { name, email, role, phone, socketId, location }
 
-// Seed mock accounts with phone numbers
-registeredUsers.set('customer@resq.com', {
-  name: 'Alice Customer',
-  email: 'customer@resq.com',
-  password: 'password123',
-  phone: '+1 (555) 019-2834',
-  role: 'customer'
-});
-registeredUsers.set('mechanic@resq.com', {
-  name: 'Bob Mechanic',
-  email: 'mechanic@resq.com',
-  password: 'password123',
-  phone: '+1 (555) 014-9988',
-  role: 'mechanic'
-});
+// Load unfinished requests on startup
+async function loadActiveRequests() {
+  try {
+    const requests = await RescueRequest.find({ status: { $in: ['pending', 'accepted'] } });
+    requests.forEach(req => {
+      activeRequests.set(req.requestId, {
+        id: req.requestId,
+        customerSocketId: null,
+        customerName: req.customerName,
+        customerEmail: req.customerEmail,
+        customerPhone: req.customerPhone,
+        vehicleType: req.vehicleType,
+        description: req.description,
+        location: req.location,
+        status: req.status,
+        mechanicSocketId: null,
+        mechanicName: req.mechanicName,
+        mechanicEmail: req.mechanicEmail,
+        mechanicPhone: req.mechanicPhone,
+        mechanicLocation: req.mechanicLocation,
+        timestamp: req.createdAt ? req.createdAt.getTime() : Date.now()
+      });
+    });
+    console.log(`[DB] Restored ${activeRequests.size} active requests from database into memory.`);
+  } catch (err) {
+    console.error('[DB] Failed to restore active requests:', err.message);
+  }
+}
 
 // Helper: Haversine formula to calculate distance in km
 function getDistance(lat1, lon1, lat2, lon2) {
@@ -267,7 +359,7 @@ function broadcastOnlineMechanics() {
 // ========================================================
 
 // 1. User Registration
-app.post('/api/register', (req, res) => {
+app.post('/api/register', async (req, res) => {
   const { name, email, password, role, phone } = req.body;
   
   if (!name || !email || !password || !role || !phone) {
@@ -275,39 +367,45 @@ app.post('/api/register', (req, res) => {
   }
 
   const normalizedEmail = email.trim().toLowerCase();
-  if (registeredUsers.has(normalizedEmail)) {
-    return res.status(400).json({ error: 'An account with this email already exists.' });
+  try {
+    const existingUser = await User.findOne({ email: normalizedEmail });
+    if (existingUser) {
+      return res.status(400).json({ error: 'An account with this email already exists.' });
+    }
+
+    if (role !== 'customer' && role !== 'mechanic') {
+      return res.status(400).json({ error: 'Invalid user role selected.' });
+    }
+
+    const newUser = new User({
+      name: name.trim(),
+      email: normalizedEmail,
+      password, // Stored as plain text for simple prototype
+      role,
+      phone: phone.trim()
+    });
+
+    await newUser.save();
+    console.log(`[User Registered] Name: ${newUser.name}, Email: ${newUser.email}, Phone: ${newUser.phone}, Role: ${newUser.role}`);
+    
+    // Send welcome email asynchronously
+    sendMail({
+      to: newUser.email,
+      subject: 'Welcome to RoadsideRescue!',
+      text: `Hello ${newUser.name}, welcome to RoadsideRescue! Your account has been registered as a ${newUser.role}. Please enable location services to use the portal.`,
+      html: getWelcomeEmailHtml(newUser.name, newUser.role, newUser.phone)
+    }).catch(err => {
+      console.error(`[Email Error] Failed to send welcome email to ${newUser.email}:`, err.message);
+    });
+    
+    return res.status(201).json({
+      message: 'Registration successful!',
+      user: { name: newUser.name, email: newUser.email, role: newUser.role }
+    });
+  } catch (err) {
+    console.error('Registration API error:', err.message);
+    return res.status(500).json({ error: 'Internal server error occurred.' });
   }
-
-  if (role !== 'customer' && role !== 'mechanic') {
-    return res.status(400).json({ error: 'Invalid user role selected.' });
-  }
-
-  const newUser = {
-    name: name.trim(),
-    email: normalizedEmail,
-    password, // Stored as plain text for simple prototype
-    role,
-    phone: phone.trim()
-  };
-
-  registeredUsers.set(normalizedEmail, newUser);
-  console.log(`[User Registered] Name: ${newUser.name}, Email: ${newUser.email}, Phone: ${newUser.phone}, Role: ${newUser.role}`);
-  
-  // Send welcome email asynchronously
-  sendMail({
-    to: newUser.email,
-    subject: 'Welcome to RoadsideRescue!',
-    text: `Hello ${newUser.name}, welcome to RoadsideRescue! Your account has been registered as a ${newUser.role}. Please enable location services to use the portal.`,
-    html: getWelcomeEmailHtml(newUser.name, newUser.role, newUser.phone)
-  }).catch(err => {
-    console.error(`[Email Error] Failed to send welcome email to ${newUser.email}:`, err.message);
-  });
-  
-  return res.status(201).json({
-    message: 'Registration successful!',
-    user: { name: newUser.name, email: newUser.email, role: newUser.role }
-  });
 });
 
 // 2. User Login
@@ -319,55 +417,60 @@ app.post('/api/login', async (req, res) => {
   }
 
   const normalizedEmail = email.trim().toLowerCase();
-  const user = registeredUsers.get(normalizedEmail);
-
-  if (!user || user.password !== password) {
-    return res.status(401).json({ error: 'Invalid email or password credentials.' });
-  }
-
-  console.log(`[Login Attempt] Credentials verified for Name: ${user.name}, Email: ${user.email}`);
-
-  // Generate 6-digit OTP
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
-  const resendAvailableAt = Date.now() + 30 * 1000; // 30 seconds resend cooldown
-
-  pendingOTPs.set(normalizedEmail, { otp, expiresAt, resendAvailableAt });
-
-  console.log(`[OTP Generated] Email: ${normalizedEmail}, OTP: ${otp} (Expires: 5m, Resend Cooldown: 30s)`);
-
-  // Send OTP email
-  let mailResult = null;
   try {
-    mailResult = await sendMail({
-      to: user.email,
-      subject: `Your RoadsideRescue Login Code: ${otp}`,
-      text: `Hello ${user.name}, your security verification passcode is ${otp}. It will expire in 5 minutes.`,
-      html: getOTPEmailHtml(user.name, otp)
-    });
-  } catch (err) {
-    console.error(`[Email Error] Failed to send login OTP to ${user.email}:`, err.message);
-  }
+    const user = await User.findOne({ email: normalizedEmail });
 
-  const responseData = {
-    status: 'otp_sent',
-    message: 'Verification passcode sent to your registered email address.',
-    email: normalizedEmail
-  };
-
-  // Expose OTP and mock preview link in local dev/demo mode
-  if (!process.env.SMTP_HOST) {
-    responseData.otp = otp;
-    if (mailResult && mailResult.previewUrl) {
-      responseData.previewUrl = mailResult.previewUrl;
+    if (!user || user.password !== password) {
+      return res.status(401).json({ error: 'Invalid email or password credentials.' });
     }
-  }
 
-  return res.json(responseData);
+    console.log(`[Login Attempt] Credentials verified for Name: ${user.name}, Email: ${user.email}`);
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
+    const resendAvailableAt = Date.now() + 30 * 1000; // 30 seconds resend cooldown
+
+    pendingOTPs.set(normalizedEmail, { otp, expiresAt, resendAvailableAt });
+
+    console.log(`[OTP Generated] Email: ${normalizedEmail}, OTP: ${otp} (Expires: 5m, Resend Cooldown: 30s)`);
+
+    // Send OTP email
+    let mailResult = null;
+    try {
+      mailResult = await sendMail({
+        to: user.email,
+        subject: `Your RoadsideRescue Login Code: ${otp}`,
+        text: `Hello ${user.name}, your security verification passcode is ${otp}. It will expire in 5 minutes.`,
+        html: getOTPEmailHtml(user.name, otp)
+      });
+    } catch (err) {
+      console.error(`[Email Error] Failed to send login OTP to ${user.email}:`, err.message);
+    }
+
+    const responseData = {
+      status: 'otp_sent',
+      message: 'Verification passcode sent to your registered email address.',
+      email: normalizedEmail
+    };
+
+    // Expose OTP and mock preview link in local dev/demo mode
+    if (!process.env.SMTP_HOST) {
+      responseData.otp = otp;
+      if (mailResult && mailResult.previewUrl) {
+        responseData.previewUrl = mailResult.previewUrl;
+      }
+    }
+
+    return res.json(responseData);
+  } catch (err) {
+    console.error('Login API error:', err.message);
+    return res.status(500).json({ error: 'Internal server error occurred.' });
+  }
 });
 
 // 2a. Verify OTP
-app.post('/api/verify-otp', (req, res) => {
+app.post('/api/verify-otp', async (req, res) => {
   const { email, otp } = req.body;
 
   if (!email || !otp) {
@@ -390,21 +493,26 @@ app.post('/api/verify-otp', (req, res) => {
     return res.status(400).json({ error: 'Invalid verification passcode.' });
   }
 
-  // OTP is correct! Fetch the registered user data
-  const user = registeredUsers.get(normalizedEmail);
-  if (!user) {
-    return res.status(404).json({ error: 'User account not found.' });
+  try {
+    // OTP is correct! Fetch the registered user data
+    const user = await User.findOne({ email: normalizedEmail });
+    if (!user) {
+      return res.status(404).json({ error: 'User account not found.' });
+    }
+
+    // Remove the OTP from cache
+    pendingOTPs.delete(normalizedEmail);
+
+    console.log(`[OTP Verified] Successful login for: ${user.name} (${user.email})`);
+
+    return res.json({
+      message: 'OTP verification successful!',
+      user: { name: user.name, email: user.email, role: user.role, phone: user.phone }
+    });
+  } catch (err) {
+    console.error('Verify OTP API error:', err.message);
+    return res.status(500).json({ error: 'Internal server error occurred.' });
   }
-
-  // Remove the OTP from cache
-  pendingOTPs.delete(normalizedEmail);
-
-  console.log(`[OTP Verified] Successful login for: ${user.name} (${user.email})`);
-
-  return res.json({
-    message: 'OTP verification successful!',
-    user: { name: user.name, email: user.email, role: user.role, phone: user.phone }
-  });
 });
 
 // 2b. Resend OTP
@@ -416,53 +524,58 @@ app.post('/api/resend-otp', async (req, res) => {
   }
 
   const normalizedEmail = email.trim().toLowerCase();
-  const user = registeredUsers.get(normalizedEmail);
-
-  if (!user) {
-    return res.status(404).json({ error: 'User account not found.' });
-  }
-
-  const cachedOtpData = pendingOTPs.get(normalizedEmail);
-  if (cachedOtpData && Date.now() < cachedOtpData.resendAvailableAt) {
-    const waitTimeSec = Math.ceil((cachedOtpData.resendAvailableAt - Date.now()) / 1000);
-    return res.status(429).json({ error: `Please wait ${waitTimeSec} seconds before requesting a new code.` });
-  }
-
-  // Generate new OTP
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
-  const resendAvailableAt = Date.now() + 30 * 1000; // 30 seconds cooldown
-
-  pendingOTPs.set(normalizedEmail, { otp, expiresAt, resendAvailableAt });
-
-  console.log(`[OTP Resent] Email: ${normalizedEmail}, OTP: ${otp}`);
-
-  // Send new OTP email
-  let mailResult = null;
   try {
-    mailResult = await sendMail({
-      to: user.email,
-      subject: `Your New RoadsideRescue Login Code: ${otp}`,
-      text: `Hello ${user.name}, your new security verification passcode is ${otp}. It will expire in 5 minutes.`,
-      html: getOTPEmailHtml(user.name, otp)
-    });
-  } catch (err) {
-    console.error(`[Email Error] Failed to resend login OTP to ${user.email}:`, err.message);
-  }
+    const user = await User.findOne({ email: normalizedEmail });
 
-  const responseData = {
-    message: 'A new security passcode has been sent to your email.'
-  };
-
-  // Expose OTP and mock preview link in local dev/demo mode
-  if (!process.env.SMTP_HOST) {
-    responseData.otp = otp;
-    if (mailResult && mailResult.previewUrl) {
-      responseData.previewUrl = mailResult.previewUrl;
+    if (!user) {
+      return res.status(404).json({ error: 'User account not found.' });
     }
-  }
 
-  return res.json(responseData);
+    const cachedOtpData = pendingOTPs.get(normalizedEmail);
+    if (cachedOtpData && Date.now() < cachedOtpData.resendAvailableAt) {
+      const waitTimeSec = Math.ceil((cachedOtpData.resendAvailableAt - Date.now()) / 1000);
+      return res.status(429).json({ error: `Please wait ${waitTimeSec} seconds before requesting a new code.` });
+    }
+
+    // Generate new OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
+    const resendAvailableAt = Date.now() + 30 * 1000; // 30 seconds cooldown
+
+    pendingOTPs.set(normalizedEmail, { otp, expiresAt, resendAvailableAt });
+
+    console.log(`[OTP Resent] Email: ${normalizedEmail}, OTP: ${otp}`);
+
+    // Send new OTP email
+    let mailResult = null;
+    try {
+      mailResult = await sendMail({
+        to: user.email,
+        subject: `Your New RoadsideRescue Login Code: ${otp}`,
+        text: `Hello ${user.name}, your new security verification passcode is ${otp}. It will expire in 5 minutes.`,
+        html: getOTPEmailHtml(user.name, otp)
+      });
+    } catch (err) {
+      console.error(`[Email Error] Failed to resend login OTP to ${user.email}:`, err.message);
+    }
+
+    const responseData = {
+      message: 'A new security passcode has been sent to your email.'
+    };
+
+    // Expose OTP and mock preview link in local dev/demo mode
+    if (!process.env.SMTP_HOST) {
+      responseData.otp = otp;
+      if (mailResult && mailResult.previewUrl) {
+        responseData.previewUrl = mailResult.previewUrl;
+      }
+    }
+
+    return res.json(responseData);
+  } catch (err) {
+    console.error('Resend OTP API error:', err.message);
+    return res.status(500).json({ error: 'Internal server error occurred.' });
+  }
 });
 
 // 3. Gemini Chatbot Proxy Endpoint
@@ -529,11 +642,18 @@ io.on('connection', (socket) => {
   console.log(`[Socket Connected] ID: ${socket.id}`);
 
   // 1. Register Socket Session (After client logs in)
-  socket.on('register_user', (data) => {
+  socket.on('register_user', async (data) => {
     const { name, role, email } = data;
     const normalizedEmail = email ? email.trim().toLowerCase() : '';
-    const regUser = registeredUsers.get(normalizedEmail);
-    const phone = regUser ? regUser.phone : 'Not Provided';
+    let phone = 'Not Provided';
+    try {
+      const regUser = await User.findOne({ email: normalizedEmail });
+      if (regUser) {
+        phone = regUser.phone || 'Not Provided';
+      }
+    } catch (err) {
+      console.error('[Socket] Failed to fetch user phone for socket registration:', err.message);
+    }
 
     const user = {
       socketId: socket.id,
@@ -712,7 +832,7 @@ io.on('connection', (socket) => {
   });
 
   // 4. Request Help (Customer Flow)
-  socket.on('request_help', (data) => {
+  socket.on('request_help', async (data) => {
     const { vehicleType, description, location } = data;
     const customer = connectedUsers.get(socket.id);
     if (!customer) return;
@@ -731,30 +851,50 @@ io.on('connection', (socket) => {
     }
 
     const requestId = 'REQ_' + Math.random().toString(36).substr(2, 9).toUpperCase();
-    const newRequest = {
-      id: requestId,
-      customerSocketId: socket.id,
-      customerName: customer.name,
-      customerEmail: customer.email,
-      vehicleType: vehicleType || 'Car',
-      description: description || 'Roadside Emergency',
-      location: location || customer.location,
-      status: 'pending',
-      timestamp: Date.now()
-    };
+    const requestLocation = location || customer.location;
 
-    activeRequests.set(requestId, newRequest);
-    console.log(`[Help Request Created] ID: ${requestId} by Customer: ${customer.name}`);
+    try {
+      const dbRequest = new RescueRequest({
+        requestId,
+        customerName: customer.name,
+        customerEmail: customer.email,
+        customerPhone: customer.phone,
+        location: requestLocation,
+        vehicleType: vehicleType || 'Car',
+        description: description || 'Roadside Emergency',
+        status: 'pending'
+      });
 
-    // Broadcast request ONLY to the mechanics room (fully isolated)
-    io.to("mechanics_room").emit("new_breakdown_request", newRequest);
+      await dbRequest.save();
 
-    // Confirm request creation back to the customer's isolated room
-    io.to(`customer_${customer.email}`).emit('request_created', newRequest);
+      const newRequest = {
+        id: requestId,
+        customerSocketId: socket.id,
+        customerName: customer.name,
+        customerEmail: customer.email,
+        vehicleType: vehicleType || 'Car',
+        description: description || 'Roadside Emergency',
+        location: requestLocation,
+        status: 'pending',
+        timestamp: Date.now()
+      };
+
+      activeRequests.set(requestId, newRequest);
+      console.log(`[Help Request Created & Saved] ID: ${requestId} by Customer: ${customer.name}`);
+
+      // Broadcast request ONLY to the mechanics room (fully isolated)
+      io.to("mechanics_room").emit("new_breakdown_request", newRequest);
+
+      // Confirm request creation back to the customer's isolated room
+      io.to(`customer_${customer.email}`).emit('request_created', newRequest);
+    } catch (err) {
+      console.error('[Socket] Failed to create help request:', err.message);
+      socket.emit('request_error', { message: 'Failed to create request in database.' });
+    }
   });
 
   // 5. Accept Job (Mechanic Flow)
-  socket.on('accept_job', (data) => {
+  socket.on('accept_job', async (data) => {
     const { requestId } = data;
     const mechanic = onlineMechanics.get(socket.id);
     if (!mechanic || mechanic.status !== 'available') {
@@ -773,11 +913,20 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Assign job to this mechanic
-    request.status = 'accepted';
-    request.mechanicSocketId = socket.id;
-    request.mechanicName = mechanic.name;
-    request.mechanicEmail = mechanic.email;
+    try {
+      await RescueRequest.updateOne({ requestId }, {
+        status: 'accepted',
+        mechanicName: mechanic.name,
+        mechanicEmail: mechanic.email,
+        mechanicPhone: mechanic.phone || 'Not Provided',
+        mechanicLocation: mechanic.location
+      });
+
+      // Assign job to this mechanic
+      request.status = 'accepted';
+      request.mechanicSocketId = socket.id;
+      request.mechanicName = mechanic.name;
+      request.mechanicEmail = mechanic.email;
     request.mechanicLocation = mechanic.location;
     
     mechanic.status = 'busy';
@@ -802,44 +951,54 @@ io.on('connection', (socket) => {
 
     // Broadcast to other mechanics that the job is taken/no longer pending
     io.to("mechanics_room").emit('job_taken', { requestId });
-  });
+  } catch (err) {
+    console.error('[Socket] Failed to accept job in database:', err.message);
+    socket.emit('accept_error', { message: 'Internal error accepting job.' });
+  }
+});
 
   // 6. Complete Job
-  socket.on('complete_job', (data) => {
+  socket.on('complete_job', async (data) => {
     const { requestId } = data;
     const request = activeRequests.get(requestId);
     if (!request) return;
 
-    request.status = 'completed';
-    console.log(`[Job Completed] Request ID: ${requestId}`);
+    try {
+      await RescueRequest.updateOne({ requestId }, { status: 'completed' });
 
-    // Release mechanic
-    if (request.mechanicSocketId) {
-      const mechanic = onlineMechanics.get(request.mechanicSocketId);
-      if (mechanic) {
-        mechanic.status = 'available';
-        io.to(request.mechanicSocketId).emit('job_completed', { requestId });
-        
-        // Rejoin mechanics_room since they are available again
-        const mechSocket = io.sockets.sockets.get(request.mechanicSocketId);
-        if (mechSocket) {
-          mechSocket.join("mechanics_room");
+      request.status = 'completed';
+      console.log(`[Job Completed & Saved] Request ID: ${requestId}`);
+
+      // Release mechanic
+      if (request.mechanicSocketId) {
+        const mechanic = onlineMechanics.get(request.mechanicSocketId);
+        if (mechanic) {
+          mechanic.status = 'available';
+          io.to(request.mechanicSocketId).emit('job_completed', { requestId });
+          
+          // Rejoin mechanics_room since they are available again
+          const mechSocket = io.sockets.sockets.get(request.mechanicSocketId);
+          if (mechSocket) {
+            mechSocket.join("mechanics_room");
+          }
         }
       }
+
+      // Notify customer on their isolated room
+      io.to(`customer_${request.customerEmail}`).emit('job_completed', { requestId });
+
+      // Clean up request from active listing
+      activeRequests.delete(requestId);
+
+      // Refresh lists for customers
+      broadcastOnlineMechanics();
+    } catch (err) {
+      console.error('[Socket] Failed to complete job in database:', err.message);
     }
-
-    // Notify customer on their isolated room
-    io.to(`customer_${request.customerEmail}`).emit('job_completed', { requestId });
-
-    // Clean up request from active listing
-    activeRequests.delete(requestId);
-
-    // Refresh lists for customers
-    broadcastOnlineMechanics();
   });
 
   // 7. Cancel Job (Customer or Mechanic)
-  socket.on('cancel_job', (data) => {
+  socket.on('cancel_job', async (data) => {
     const { requestId } = data;
     const request = activeRequests.get(requestId);
     if (!request) return;
@@ -849,56 +1008,71 @@ io.on('connection', (socket) => {
 
     console.log(`[Job Cancelled] Request ID: ${requestId} by ${requestOwner ? 'Customer' : 'Mechanic'}`);
 
-    if (requestOwner) {
-      // Customer cancelled the request
-      request.status = 'cancelled';
-      
-      // Notify assigned mechanic (if any)
-      if (request.mechanicSocketId) {
-        const mechanic = onlineMechanics.get(request.mechanicSocketId);
-        if (mechanic) {
-          mechanic.status = 'available';
-          io.to(request.mechanicSocketId).emit('job_cancelled_by_customer', { requestId });
-          
-          // Rejoin mechanics_room
-          const mechSocket = io.sockets.sockets.get(request.mechanicSocketId);
-          if (mechSocket) {
-            mechSocket.join("mechanics_room");
+    try {
+      if (requestOwner) {
+        // Customer cancelled the request
+        await RescueRequest.updateOne({ requestId }, { status: 'cancelled' });
+        request.status = 'cancelled';
+        
+        // Notify assigned mechanic (if any)
+        if (request.mechanicSocketId) {
+          const mechanic = onlineMechanics.get(request.mechanicSocketId);
+          if (mechanic) {
+            mechanic.status = 'available';
+            io.to(request.mechanicSocketId).emit('job_cancelled_by_customer', { requestId });
+            
+            // Rejoin mechanics_room
+            const mechSocket = io.sockets.sockets.get(request.mechanicSocketId);
+            if (mechSocket) {
+              mechSocket.join("mechanics_room");
+            }
           }
         }
+
+        // Notify all available mechanics in mechanics_room to remove this card
+        io.to("mechanics_room").emit('job_taken', { requestId: requestId });
+
+        io.to(`customer_${request.customerEmail}`).emit('job_cancelled_ack', { requestId });
+        activeRequests.delete(requestId);
+        
+        // Update mechanic list to customers
+        broadcastOnlineMechanics();
+      } else if (requestAssignedMech) {
+        // Mechanic backed out of the request. Put request back to pending.
+        await RescueRequest.updateOne({ requestId }, {
+          status: 'pending',
+          mechanicName: null,
+          mechanicEmail: null,
+          mechanicPhone: null,
+          mechanicLocation: null
+        });
+
+        request.status = 'pending';
+        request.mechanicSocketId = null;
+        request.mechanicName = null;
+        request.mechanicLocation = null;
+        request.mechanicEmail = null;
+        request.mechanicPhone = null;
+
+        // Make mechanic available again
+        const mechanic = onlineMechanics.get(socket.id);
+        if (mechanic) {
+          mechanic.status = 'available';
+          socket.join("mechanics_room"); // Rejoin availability room
+          socket.emit('job_cancelled_ack', { requestId });
+        }
+
+        // Notify customer that mechanic cancelled, request is back to searching
+        io.to(`customer_${request.customerEmail}`).emit('mechanic_cancelled', { requestId });
+
+        // Re-broadcast to all available online mechanics
+        io.to("mechanics_room").emit('new_breakdown_request', request);
+
+        // Update mechanic list to customers
+        broadcastOnlineMechanics();
       }
-
-      // Notify all available mechanics in mechanics_room to remove this card
-      io.to("mechanics_room").emit('job_taken', { requestId: requestId });
-
-      io.to(`customer_${request.customerEmail}`).emit('job_cancelled_ack', { requestId });
-      activeRequests.delete(requestId);
-      
-      // Update mechanic list to customers
-      broadcastOnlineMechanics();
-    } else if (requestAssignedMech) {
-      // Mechanic backed out of the request. Put request back to pending.
-      request.status = 'pending';
-      request.mechanicSocketId = null;
-      request.mechanicName = null;
-      request.mechanicLocation = null;
-
-      // Make mechanic available again
-      const mechanic = onlineMechanics.get(socket.id);
-      if (mechanic) {
-        mechanic.status = 'available';
-        socket.join("mechanics_room"); // Rejoin availability room
-        socket.emit('job_cancelled_ack', { requestId });
-      }
-
-      // Notify customer that mechanic cancelled, request is back to searching
-      io.to(`customer_${request.customerEmail}`).emit('mechanic_cancelled', { requestId });
-
-      // Re-broadcast to all available online mechanics
-      io.to("mechanics_room").emit('new_breakdown_request', request);
-
-      // Update mechanic list to customers
-      broadcastOnlineMechanics();
+    } catch (err) {
+      console.error('[Socket] Failed to cancel job in database:', err.message);
     }
   });
 
@@ -927,8 +1101,20 @@ io.on('connection', (socket) => {
 
             if (!reconnected) {
               console.log(`[Offline Timeout] Mechanic: ${user.name} failed to reconnect. Reverting active jobs.`);
-              activeRequests.forEach((req, reqId) => {
+              activeRequests.forEach(async (req, reqId) => {
                 if (req.mechanicEmail === user.email && req.status === 'accepted') {
+                  try {
+                    await RescueRequest.updateOne({ requestId: reqId }, {
+                      status: 'pending',
+                      mechanicName: null,
+                      mechanicEmail: null,
+                      mechanicPhone: null,
+                      mechanicLocation: null
+                    });
+                  } catch (err) {
+                    console.error('[Socket] Disconnect cleanup error reverting request:', err.message);
+                  }
+
                   req.status = 'pending';
                   req.mechanicSocketId = null;
                   req.mechanicName = null;
@@ -960,8 +1146,14 @@ io.on('connection', (socket) => {
 
           if (!reconnected) {
             console.log(`[Offline Timeout] Customer: ${user.name} failed to reconnect. Cleaning up pending requests.`);
-            activeRequests.forEach((req, reqId) => {
+            activeRequests.forEach(async (req, reqId) => {
               if (req.customerEmail === user.email && req.status === 'pending') {
+                try {
+                  await RescueRequest.updateOne({ requestId: reqId }, { status: 'cancelled' });
+                } catch (err) {
+                  console.error('[Socket] Disconnect cleanup error cancelling pending:', err.message);
+                }
+
                 // Remove card from all mechanics
                 io.to("mechanics_room").emit('job_taken', { requestId: reqId });
                 activeRequests.delete(reqId);
@@ -981,8 +1173,14 @@ io.on('connection', (socket) => {
 
           if (!reconnected) {
             console.log(`[Offline Timeout] Customer: ${user.name} failed to reconnect. Cancelling accepted rescue.`);
-            activeRequests.forEach((req, reqId) => {
+            activeRequests.forEach(async (req, reqId) => {
               if (req.customerEmail === user.email && req.status === 'accepted') {
+                try {
+                  await RescueRequest.updateOne({ requestId: reqId }, { status: 'cancelled' });
+                } catch (err) {
+                  console.error('[Socket] Disconnect cleanup error cancelling accepted:', err.message);
+                }
+
                 if (req.mechanicSocketId) {
                   const mechanic = onlineMechanics.get(req.mechanicSocketId);
                   if (mechanic) {
