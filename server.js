@@ -189,16 +189,47 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Connect to MongoDB
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/RoadResQ';
-console.log(`[DB] Connecting to MongoDB at ${MONGODB_URI}...`);
-mongoose.connect(MONGODB_URI)
-  .then(() => {
+let isConnecting = false;
+let dbConnected = false;
+
+async function connectToDatabase() {
+  if (dbConnected) return;
+  if (mongoose.connection.readyState === 1) {
+    dbConnected = true;
+    return;
+  }
+  if (isConnecting) {
+    while (mongoose.connection.readyState === 2) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (mongoose.connection.readyState === 1) {
+      dbConnected = true;
+      return;
+    }
+  }
+
+  isConnecting = true;
+  console.log(`[DB] Connecting to MongoDB at ${MONGODB_URI}...`);
+  try {
+    await mongoose.connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 5000,
+    });
+    dbConnected = true;
     console.log('[DB] Successfully connected to MongoDB.');
-    seedMockAccounts();
-    loadActiveRequests();
-  })
-  .catch(err => {
+    await seedMockAccounts();
+    await loadActiveRequests();
+  } catch (err) {
     console.error('[DB] Connection error:', err.message);
-  });
+    throw err;
+  } finally {
+    isConnecting = false;
+  }
+}
+
+// In local environment or non-serverless, we connect immediately
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  connectToDatabase().catch(() => {});
+}
 
 // MongoDB Schemas & Models
 const userSchema = new mongoose.Schema({
@@ -368,6 +399,7 @@ app.post('/api/register', async (req, res) => {
 
   const normalizedEmail = email.trim().toLowerCase();
   try {
+    await connectToDatabase();
     const existingUser = await User.findOne({ email: normalizedEmail });
     if (existingUser) {
       return res.status(400).json({ error: 'An account with this email already exists.' });
@@ -418,6 +450,7 @@ app.post('/api/login', async (req, res) => {
 
   const normalizedEmail = email.trim().toLowerCase();
   try {
+    await connectToDatabase();
     const user = await User.findOne({ email: normalizedEmail });
 
     if (!user || user.password !== password) {
@@ -494,6 +527,7 @@ app.post('/api/verify-otp', async (req, res) => {
   }
 
   try {
+    await connectToDatabase();
     // OTP is correct! Fetch the registered user data
     const user = await User.findOne({ email: normalizedEmail });
     if (!user) {
@@ -525,6 +559,7 @@ app.post('/api/resend-otp', async (req, res) => {
 
   const normalizedEmail = email.trim().toLowerCase();
   try {
+    await connectToDatabase();
     const user = await User.findOne({ email: normalizedEmail });
 
     if (!user) {
@@ -647,6 +682,7 @@ io.on('connection', (socket) => {
     const normalizedEmail = email ? email.trim().toLowerCase() : '';
     let phone = 'Not Provided';
     try {
+      await connectToDatabase();
       const regUser = await User.findOne({ email: normalizedEmail });
       if (regUser) {
         phone = regUser.phone || 'Not Provided';
