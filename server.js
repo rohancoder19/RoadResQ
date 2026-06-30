@@ -188,7 +188,43 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Connect to MongoDB
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/RoadResQ';
+const RAW_MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/RoadResQ';
+
+function sanitizeMongoDBURI(uri) {
+  if (!uri) return uri;
+  try {
+    const protocolMatch = uri.match(/^(mongodb(?:\+srv)?:\/\/)(.*)$/);
+    if (!protocolMatch) return uri;
+    const protocol = protocolMatch[1];
+    const rest = protocolMatch[2];
+    
+    const lastAtIndex = rest.lastIndexOf('@');
+    if (lastAtIndex === -1) return uri;
+    
+    const credentials = rest.substring(0, lastAtIndex);
+    const host = rest.substring(lastAtIndex + 1);
+    
+    const colonIndex = credentials.indexOf(':');
+    if (colonIndex === -1) return uri;
+    
+    const username = credentials.substring(0, colonIndex);
+    const password = credentials.substring(colonIndex + 1);
+    
+    // Decode first to prevent double-encoding
+    const decodedUsername = decodeURIComponent(username);
+    const decodedPassword = decodeURIComponent(password);
+    
+    const encodedUsername = encodeURIComponent(decodedUsername);
+    const encodedPassword = encodeURIComponent(decodedPassword);
+    
+    return `${protocol}${encodedUsername}:${encodedPassword}@${host}`;
+  } catch (e) {
+    console.error('[DB] Error sanitizing MongoDB URI:', e.message);
+    return uri;
+  }
+}
+
+const MONGODB_URI = sanitizeMongoDBURI(RAW_MONGODB_URI);
 let isConnecting = false;
 let dbConnected = false;
 
