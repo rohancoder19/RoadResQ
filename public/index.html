@@ -532,8 +532,19 @@
               </div>
             </div>
 
-            <div class="text-[10px] text-slate-500 italic text-center p-2 bg-slate-50 border border-slate-200 rounded-lg">
-              Demo Helper: To simulate moving closer to the customer, click and drag your orange responder pin on the map!
+            <!-- Ola/Uber Drive Simulation Controls -->
+            <div class="p-4 bg-orange-50/50 border border-brand-orange/20 rounded-xl flex flex-col gap-2 shadow-sm">
+              <div class="flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-brand-orange animate-pulse"></span>
+                <span class="text-[9px] text-brand-orange font-bold uppercase tracking-wider block">Ola/Uber Drive Simulator</span>
+              </div>
+              <div class="flex items-center justify-between mt-1">
+                <span class="text-[10px] text-slate-500 font-semibold" id="simulation-status">Simulation idle</span>
+                <button type="button" onclick="toggleDriveSimulation()" id="btn-simulation-toggle" class="px-3 py-1.5 bg-brand-navy hover:bg-brand-navyHover text-white text-[10px] font-bold rounded-lg transition active:scale-95 shadow-sm">
+                  Start Simulation
+                </button>
+              </div>
+              <p class="text-[8px] text-slate-400 leading-normal mt-1">Simulates real-time road driving by calculating the route and moving your marker step-by-step to the customer.</p>
             </div>
 
             <!-- Action buttons -->
@@ -715,6 +726,7 @@
     let myMarker = null;
     let otherMarker = null;
     let mapRouteLine = null;
+    let directionsService = null;
     
     // Track other mechanics' markers on the Customer's map
     let customerMechanicMarkers = new Map(); // socketId -> HTMLMarker
@@ -1665,6 +1677,54 @@
     function drawRouteLine(start, end) {
       if (!map || !start || !end) return;
 
+      if (typeof google !== 'undefined' && google.maps && google.maps.DirectionsService) {
+        if (!directionsService) {
+          directionsService = new google.maps.DirectionsService();
+        }
+        directionsService.route({
+          origin: new google.maps.LatLng(start.lat, start.lng),
+          destination: new google.maps.LatLng(end.lat, end.lng),
+          travelMode: google.maps.TravelMode.DRIVING
+        }, (response, status) => {
+          if (status === google.maps.DirectionsStatus.OK) {
+            const route = response.routes[0];
+            const pathPoints = route.overview_path;
+
+            if (mapRouteLine) {
+              mapRouteLine.setPath(pathPoints);
+              mapRouteLine.setOptions({
+                strokeColor: '#3b82f6', // Uber-like blue line
+                strokeOpacity: 0.85,
+                strokeWeight: 6,
+                icons: []
+              });
+            } else {
+              mapRouteLine = new google.maps.Polyline({
+                path: pathPoints,
+                strokeColor: '#3b82f6',
+                strokeOpacity: 0.85,
+                strokeWeight: 6,
+                map: map
+              });
+            }
+
+            const bounds = new google.maps.LatLngBounds();
+            pathPoints.forEach(pt => bounds.extend(pt));
+            map.fitBounds(bounds);
+
+            const leg = route.legs[0];
+            updateLiveRouteDetails(leg.distance.text, leg.duration.text);
+            return;
+          }
+          // Fallback if status is not OK
+          drawStraightRouteLine(start, end);
+        });
+      } else {
+        drawStraightRouteLine(start, end);
+      }
+    }
+
+    function drawStraightRouteLine(start, end) {
       const startLatLng = new google.maps.LatLng(start.lat, start.lng);
       const endLatLng = new google.maps.LatLng(end.lat, end.lng);
       const pathPoints = [startLatLng, endLatLng];
@@ -1677,10 +1737,19 @@
 
       if (mapRouteLine) {
         mapRouteLine.setPath(pathPoints);
+        mapRouteLine.setOptions({
+          strokeColor: '#f97316',
+          strokeOpacity: 0,
+          icons: [{
+            icon: lineSymbol,
+            offset: '0',
+            repeat: '15px'
+          }]
+        });
       } else {
         mapRouteLine = new google.maps.Polyline({
           path: pathPoints,
-          strokeColor: '#f97316', // Orange connecting route
+          strokeColor: '#f97316',
           strokeOpacity: 0,
           icons: [{
             icon: lineSymbol,
@@ -1695,6 +1764,32 @@
       bounds.extend(startLatLng);
       bounds.extend(endLatLng);
       map.fitBounds(bounds);
+    }
+
+    function updateLiveRouteDetails(distanceText, durationText) {
+      if (currentRole === 'customer') {
+        const step3Desc = document.getElementById('step3-desc');
+        if (step3Desc) {
+          step3Desc.innerHTML = `<span class="font-bold text-slate-700">En route</span> • ${distanceText} away • <span class="text-brand-orange font-bold">${durationText} ETA</span>`;
+        }
+        
+        const matchedMechPhone = document.getElementById('matched-mech-phone');
+        if (matchedMechPhone) {
+          let detailsDiv = document.getElementById('eta-badge');
+          if (!detailsDiv) {
+            detailsDiv = document.createElement('div');
+            detailsDiv.id = 'eta-badge';
+            detailsDiv.className = 'mt-2 text-[10px] font-bold text-brand-orange bg-orange-50 border border-orange-100 rounded-lg px-2.5 py-1 flex items-center gap-1.5 w-fit';
+            matchedMechPhone.parentNode.appendChild(detailsDiv);
+          }
+          detailsDiv.innerHTML = `🚗 Arriving in ${durationText} (${distanceText})`;
+        }
+      } else {
+        const distanceEl = document.getElementById('active-job-distance');
+        if (distanceEl) {
+          distanceEl.innerHTML = `<span class="text-slate-800 font-bold">${distanceText}</span> (${durationText} drive)`;
+        }
+      }
     }
 
     // Helper: Haversine distance
@@ -1988,6 +2083,7 @@
         playNotificationSound();
         showToast('Roadside emergency rescue completed successfully!', 'success');
         
+        stopDriveSimulation();
         activeAssistanceRequest = null;
         
         if (currentRole === 'customer') {
@@ -2106,11 +2202,12 @@
         playNotificationSound();
         showToast('The customer cancelled the assistance request.', 'warning');
         
+        stopDriveSimulation();
         activeAssistanceRequest = null;
-
+ 
         document.getElementById('mech-active-job-container').classList.add('hidden');
         document.getElementById('mech-available-jobs-container').classList.remove('hidden');
-
+ 
         updateMapMarkers();
       });
 
@@ -2206,6 +2303,7 @@
       
       socket.on('disconnect', () => {
         console.warn("Socket disconnected.");
+        stopDriveSimulation();
       });
     }
 
@@ -2416,6 +2514,7 @@
     }
 
     function completeActiveJob() {
+      stopDriveSimulation();
       if (activeAssistanceRequest) {
         socket.emit('complete_job', { requestId: activeAssistanceRequest.id });
       }
@@ -2424,8 +2523,150 @@
     function cancelActiveJob() {
       if (activeAssistanceRequest) {
         if (confirm("Are you sure you want to cancel this operations?")) {
+          stopDriveSimulation();
           socket.emit('cancel_job', { requestId: activeAssistanceRequest.id });
         }
+      }
+    }
+
+    // drive simulation variables
+    let driveSimulationInterval = null;
+    let driveSimulationPoints = [];
+    let driveSimulationIndex = 0;
+
+    function toggleDriveSimulation() {
+      const btn = document.getElementById('btn-simulation-toggle');
+      const statusText = document.getElementById('simulation-status');
+      if (!btn || !statusText) return;
+
+      if (driveSimulationInterval) {
+        stopDriveSimulation();
+        statusText.innerText = "Simulation stopped";
+      } else {
+        if (!activeAssistanceRequest) {
+          showToast("No active operations to simulate.", "warning");
+          return;
+        }
+
+        const start = myLocation;
+        const end = activeAssistanceRequest.location;
+
+        if (!start || !end) {
+          showToast("Missing location details for simulation.", "warning");
+          return;
+        }
+
+        statusText.innerText = "Calculating route...";
+        btn.innerText = "Stop";
+        btn.className = "px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-[10px] font-bold rounded-lg transition active:scale-95 shadow-sm";
+
+        if (typeof google !== 'undefined' && google.maps && google.maps.DirectionsService) {
+          const ds = new google.maps.DirectionsService();
+          ds.route({
+            origin: new google.maps.LatLng(start.lat, start.lng),
+            destination: new google.maps.LatLng(end.lat, end.lng),
+            travelMode: google.maps.TravelMode.DRIVING
+          }, (response, status) => {
+            if (status === google.maps.DirectionsStatus.OK) {
+              const route = response.routes[0];
+              driveSimulationPoints = [];
+              route.legs[0].steps.forEach(step => {
+                step.path.forEach(latLng => {
+                  driveSimulationPoints.push({ lat: latLng.lat(), lng: latLng.lng() });
+                });
+              });
+
+              if (driveSimulationPoints.length === 0) {
+                statusText.innerText = "No route points found";
+                stopDriveSimulation();
+                return;
+              }
+
+              driveSimulationIndex = 0;
+              statusText.innerText = `Driving... (0/${driveSimulationPoints.length})`;
+              
+              driveSimulationInterval = setInterval(() => {
+                if (driveSimulationIndex >= driveSimulationPoints.length) {
+                  statusText.innerText = "Arrived!";
+                  stopDriveSimulation();
+                  return;
+                }
+
+                const nextLoc = driveSimulationPoints[driveSimulationIndex];
+                myLocation = nextLoc;
+                driveSimulationIndex++;
+
+                statusText.innerText = `Driving... (${driveSimulationIndex}/${driveSimulationPoints.length})`;
+
+                updateMyLocationMarker();
+
+                if (socket && socket.connected) {
+                  socket.emit('update_location', myLocation);
+                }
+
+                recalculateRouteAndDistance();
+              }, 1200);
+
+            } else {
+              statusText.innerText = "Routing failed, using fallback straight path";
+              startFallbackSimulation(start, end, statusText);
+            }
+          });
+        } else {
+          statusText.innerText = "Google API not available, using fallback straight path";
+          startFallbackSimulation(start, end, statusText);
+        }
+      }
+    }
+
+    function startFallbackSimulation(start, end, statusText) {
+      driveSimulationPoints = [];
+      const steps = 15;
+      for (let i = 0; i <= steps; i++) {
+        const factor = i / steps;
+        driveSimulationPoints.push({
+          lat: start.lat + (end.lat - start.lat) * factor,
+          lng: start.lng + (end.lng - start.lng) * factor
+        });
+      }
+
+      driveSimulationIndex = 0;
+      driveSimulationInterval = setInterval(() => {
+        if (driveSimulationIndex >= driveSimulationPoints.length) {
+          statusText.innerText = "Arrived!";
+          stopDriveSimulation();
+          return;
+        }
+
+        const nextLoc = driveSimulationPoints[driveSimulationIndex];
+        myLocation = nextLoc;
+        driveSimulationIndex++;
+
+        statusText.innerText = `Driving... (${driveSimulationIndex}/${driveSimulationPoints.length})`;
+
+        updateMyLocationMarker();
+
+        if (socket && socket.connected) {
+          socket.emit('update_location', myLocation);
+        }
+
+        recalculateRouteAndDistance();
+      }, 1200);
+    }
+
+    function stopDriveSimulation() {
+      if (driveSimulationInterval) {
+        clearInterval(driveSimulationInterval);
+        driveSimulationInterval = null;
+      }
+      const btn = document.getElementById('btn-simulation-toggle');
+      const statusText = document.getElementById('simulation-status');
+      if (btn) {
+        btn.innerText = "Start Simulation";
+        btn.className = "px-3 py-1.5 bg-brand-navy hover:bg-brand-navyHover text-white text-[10px] font-bold rounded-lg transition active:scale-95 shadow-sm";
+      }
+      if (statusText && statusText.innerText.includes("Driving")) {
+        statusText.innerText = "Simulation idle";
       }
     }
 
