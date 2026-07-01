@@ -544,6 +544,10 @@ app.post('/api/login', async (req, res) => {
       email: normalizedEmail
     };
 
+    if (!process.env.SMTP_HOST && mailResult && mailResult.previewUrl) {
+      responseData.previewUrl = mailResult.previewUrl;
+    }
+
     return res.json(responseData);
   } catch (err) {
     console.error('Login API error:', err.message);
@@ -653,6 +657,10 @@ app.post('/api/resend-otp', async (req, res) => {
     const responseData = {
       message: 'A new security passcode has been sent to your email.'
     };
+
+    if (!process.env.SMTP_HOST && mailResult && mailResult.previewUrl) {
+      responseData.previewUrl = mailResult.previewUrl;
+    }
 
     return res.json(responseData);
   } catch (err) {
