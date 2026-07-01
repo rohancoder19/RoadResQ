@@ -134,11 +134,12 @@
             <p class="text-[11px] text-slate-500 mt-0.5">We sent a 6-digit security code to:</p>
             <p class="text-xs font-bold text-brand-navy select-all mt-0.5" id="otp-target-email">user@resq.com</p>
             <!-- Development Mode Helper -->
-            <div id="otp-dev-hint" class="hidden flex flex-col gap-1.5 mt-3 p-3 bg-blue-50 border border-blue-200 rounded-xl text-center">
-              <span class="text-[10px] font-bold text-blue-800 uppercase tracking-wide">Demo Mode Mailbox</span>
-              <p class="text-[11px] text-blue-700 font-medium">Since SMTP is not configured, you can open your mock inbox here to retrieve the code:</p>
-              <a id="otp-dev-preview-link" href="#" target="_blank" class="w-full py-2 bg-brand-navy hover:bg-brand-navyHover text-white text-xs font-bold rounded-lg shadow transition mt-1 flex items-center justify-center gap-1.5">
-                ✉️ Open Email Inbox
+            <div id="otp-dev-hint" class="hidden flex flex-col gap-1.5 mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-center">
+              <span class="text-[10px] font-bold text-amber-800 uppercase tracking-wide">Developer Mode Hint</span>
+              <p class="text-[11px] text-amber-700">Since SMTP is not configured, your OTP code is:</p>
+              <strong class="text-lg font-bold text-brand-orange tracking-widest select-all" id="otp-dev-value">------</strong>
+              <a id="otp-dev-preview-link" href="#" target="_blank" class="hidden text-[10px] text-amber-600 font-semibold hover:underline mt-1">
+                ✉️ View Email Preview
               </a>
             </div>
           </div>
@@ -1128,13 +1129,20 @@
             // UI Transition to OTP Entry
             document.getElementById('otp-target-email').innerText = otpEmail;
             
-            // Development Mode Helper (Preview Link Only)
+            // Development Mode Helper
             const devHint = document.getElementById('otp-dev-hint');
+            const devValue = document.getElementById('otp-dev-value');
             const devLink = document.getElementById('otp-dev-preview-link');
-            if (data.previewUrl) {
-              devLink.href = data.previewUrl;
+            if (data.otp) {
+              devValue.innerText = data.otp;
               devHint.classList.remove('hidden');
               devHint.classList.add('flex');
+              if (data.previewUrl) {
+                devLink.href = data.previewUrl;
+                devLink.classList.remove('hidden');
+              } else {
+                devLink.classList.add('hidden');
+              }
             } else {
               devHint.classList.add('hidden');
               devHint.classList.remove('flex');
@@ -1232,13 +1240,20 @@
         if (response.ok) {
           showToast(data.message || 'Passcode resent successfully.', 'success');
           
-          // Development Mode Helper (Preview Link Only)
+          // Development Mode Helper
           const devHint = document.getElementById('otp-dev-hint');
+          const devValue = document.getElementById('otp-dev-value');
           const devLink = document.getElementById('otp-dev-preview-link');
-          if (data.previewUrl) {
-            devLink.href = data.previewUrl;
+          if (data.otp) {
+            devValue.innerText = data.otp;
             devHint.classList.remove('hidden');
             devHint.classList.add('flex');
+            if (data.previewUrl) {
+              devLink.href = data.previewUrl;
+              devLink.classList.remove('hidden');
+            } else {
+              devLink.classList.add('hidden');
+            }
           } else {
             devHint.classList.add('hidden');
             devHint.classList.remove('flex');

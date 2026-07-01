@@ -549,8 +549,12 @@ app.post('/api/login', async (req, res) => {
       email: normalizedEmail
     };
 
-    if (!process.env.SMTP_HOST && mailResult && mailResult.previewUrl) {
-      responseData.previewUrl = mailResult.previewUrl;
+    // Expose OTP and mock preview link in local dev/demo mode
+    if (!process.env.SMTP_HOST) {
+      responseData.otp = otp;
+      if (mailResult && mailResult.previewUrl) {
+        responseData.previewUrl = mailResult.previewUrl;
+      }
     }
 
     return res.json(responseData);
@@ -663,8 +667,12 @@ app.post('/api/resend-otp', async (req, res) => {
       message: 'A new security passcode has been sent to your email.'
     };
 
-    if (!process.env.SMTP_HOST && mailResult && mailResult.previewUrl) {
-      responseData.previewUrl = mailResult.previewUrl;
+    // Expose OTP and mock preview link in local dev/demo mode
+    if (!process.env.SMTP_HOST) {
+      responseData.otp = otp;
+      if (mailResult && mailResult.previewUrl) {
+        responseData.previewUrl = mailResult.previewUrl;
+      }
     }
 
     return res.json(responseData);
