@@ -13,7 +13,7 @@ const io = new Server(server);
 const PORT = process.env.PORT || 3000;
 
 // Gemini API Key for Emergency Chatbot
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim();
 
 // ========================================================
 // Email & OTP Utility Setup
@@ -193,7 +193,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Connect to MongoDB
-const RAW_MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/RoadResQ';
+const RAW_MONGODB_URI = (process.env.MONGODB_URI || '').trim() || 'mongodb://127.0.0.1:27017/RoadResQ';
 
 function sanitizeMongoDBURI(uri) {
   if (!uri) return uri;
@@ -713,7 +713,7 @@ app.post('/api/chatbot', async (req, res) => {
 // 4. Configuration Endpoint
 app.get('/api/config', (req, res) => {
   return res.json({
-    googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY || ''
+    googleMapsApiKey: (process.env.GOOGLE_MAPS_API_KEY || '').trim()
   });
 });
 
