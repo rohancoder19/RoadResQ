@@ -527,53 +527,17 @@ app.post('/api/login', async (req, res) => {
 
     console.log(`[Login Attempt] Credentials verified for Name: ${user.name}, Email: ${user.email}`);
 
-    // One-Time OTP Verification: Bypass if already verified
-    if (user.isVerified) {
-      console.log(`[Login Direct] User already verified. Bypassing OTP for ${user.email}`);
-      return res.json({
-        status: 'success',
-        message: 'Login successful!',
-        user: { name: user.name, email: user.email, role: user.role, phone: user.phone }
-      });
+    // Mark the user as verified if they aren't already
+    if (!user.isVerified) {
+      user.isVerified = true;
+      await user.save();
     }
 
-    // Generate 6-digit OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
-    const resendAvailableAt = Date.now() + 30 * 1000; // 30 seconds resend cooldown
-
-    pendingOTPs.set(normalizedEmail, { otp, expiresAt, resendAvailableAt });
-
-    console.log(`[OTP Generated] Email: ${normalizedEmail}, OTP: ${otp} (Expires: 5m, Resend Cooldown: 30s)`);
-
-    // Send OTP email
-    let mailResult = null;
-    try {
-      mailResult = await sendMail({
-        to: user.email,
-        subject: `Your RoadsideRescue Login Code: ${otp}`,
-        text: `Hello ${user.name}, your security verification passcode is ${otp}. It will expire in 5 minutes.`,
-        html: getOTPEmailHtml(user.name, otp)
-      });
-    } catch (err) {
-      console.error(`[Email Error] Failed to send login OTP to ${user.email}:`, err.message);
-    }
-
-    const responseData = {
-      status: 'otp_sent',
-      message: 'Verification passcode sent to your registered email address.',
-      email: normalizedEmail
-    };
-
-    // Expose OTP and mock preview link in local dev/demo mode
-    if (!process.env.SMTP_HOST) {
-      responseData.otp = otp;
-      if (mailResult && mailResult.previewUrl) {
-        responseData.previewUrl = mailResult.previewUrl;
-      }
-    }
-
-    return res.json(responseData);
+    return res.json({
+      status: 'success',
+      message: 'Login successful!',
+      user: { name: user.name, email: user.email, role: user.role, phone: user.phone }
+    });
   } catch (err) {
     console.error('Login API error:', err.message);
     return res.status(500).json({ error: 'Internal server error occurred.' });
