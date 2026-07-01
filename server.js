@@ -12,6 +12,68 @@ const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
 
+// ========================================================
+// External Database Setup (Firebase & Supabase)
+// ========================================================
+let firebaseDb = null;
+let supabaseClient = null;
+
+function initExternalDB() {
+  if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL) {
+    try {
+      const admin = require('firebase-admin');
+      admin.initializeApp({
+        credential: admin.credential.cert({
+          projectId: process.env.FIREBASE_PROJECT_ID,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
+        })
+      });
+      firebaseDb = admin.firestore();
+      console.log('[External DB] Firebase Firestore initialized successfully.');
+    } catch (e) {
+      console.warn('[External DB] Failed to initialize Firebase:', e.message);
+    }
+  }
+
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_KEY) {
+    try {
+      const { createClient } = require('@supabase/supabase-js');
+      supabaseClient = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+      console.log('[External DB] Supabase client initialized successfully.');
+    } catch (e) {
+      console.warn('[External DB] Failed to initialize Supabase:', e.message);
+    }
+  }
+}
+initExternalDB();
+
+function storeLocationInExternalDB(role, email, location) {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const data = {
+    role: role,
+    email: email,
+    lat: location.lat,
+    lng: location.lng,
+    timestamp: timestamp
+  };
+
+  if (firebaseDb) {
+    firebaseDb.collection('locations').doc(email).set(data)
+      .then(() => console.log(`[Firebase] Saved location for ${email}`))
+      .catch(err => console.error(`[Firebase Error] Failed to save location:`, err.message));
+  }
+
+  if (supabaseClient) {
+    supabaseClient.from('locations').upsert({ email, role, lat: location.lat, lng: location.lng, timestamp })
+      .then(({ error }) => {
+        if (error) console.error(`[Supabase Error] Failed to save location:`, error.message);
+        else console.log(`[Supabase] Saved location for ${email}`);
+      })
+      .catch(err => console.error(`[Supabase Error] Failed to upsert location:`, err.message));
+  }
+}
+
 // Gemini API Key for Emergency Chatbot
 const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim();
 
@@ -296,7 +358,7 @@ const rescueRequestSchema = new mongoose.Schema({
   },
   vehicleType: { type: String, default: 'Car' },
   description: { type: String, default: 'Roadside Emergency' },
-  status: { type: String, default: 'pending', enum: ['pending', 'accepted', 'completed', 'cancelled'] },
+  status: { type: String, default: 'pending', enum: ['pending', 'accepted', 'arrived', 'started', 'completed', 'cancelled'] },
   mechanicName: { type: String },
   mechanicEmail: { type: String },
   mechanicPhone: { type: String },
@@ -837,12 +899,20 @@ io.on('connection', (socket) => {
         
         // Notify customers of the moving mechanic marker
         broadcastOnlineMechanics();
-        
-        // If mechanic is busy, find their active request and notify customer of the updated location
+             // If mechanic is busy, find their active request and notify customer of the updated location
         if (mechanic.status === 'busy') {
           for (const [reqId, req] of activeRequests.entries()) {
-            if (req.mechanicSocketId === socket.id && req.status === 'accepted') {
+            if (req.mechanicSocketId === socket.id && ['accepted', 'arrived', 'started'].includes(req.status)) {
               req.mechanicLocation = location;
+              
+              // Store latest coordinates in MongoDB
+              RescueRequest.updateOne({ requestId: reqId }, { mechanicLocation: location }).catch(err => {
+                console.error('[DB Error] Failed to update mechanic location in database:', err.message);
+              });
+              
+              // Store in Firebase/Supabase
+              storeLocationInExternalDB('mechanic', user.email, location);
+
               io.to(`customer_${req.customerEmail}`).emit('mechanic_location_updated', location);
               break;
             }
@@ -852,10 +922,19 @@ io.on('connection', (socket) => {
     } else {
       // If customer has an active request, update the request location
       for (const [reqId, req] of activeRequests.entries()) {
-        if (req.customerSocketId === socket.id && (req.status === 'pending' || req.status === 'accepted')) {
+        if (req.customerSocketId === socket.id && ['pending', 'accepted', 'arrived', 'started'].includes(req.status)) {
           req.location = location;
+          
+          // Store latest coordinates in MongoDB
+          RescueRequest.updateOne({ requestId: reqId }, { location: location }).catch(err => {
+            console.error('[DB Error] Failed to update customer location in database:', err.message);
+          });
+          
+          // Store in Firebase/Supabase
+          storeLocationInExternalDB('customer', user.email, location);
+
           // If accepted, notify the mechanic of the customer's moving location
-          if (req.status === 'accepted' && req.mechanicSocketId) {
+          if (['accepted', 'arrived', 'started'].includes(req.status) && req.mechanicSocketId) {
             io.to(req.mechanicSocketId).emit('customer_location_updated', location);
           } else if (req.status === 'pending') {
             // Broadcast location update to all available mechanics
@@ -864,7 +943,6 @@ io.on('connection', (socket) => {
           break;
         }
       }
-      
       const nearbyMechs = getNearbyMechanics(location);
       socket.emit('nearby_mechanics_list', nearbyMechs);
     }
@@ -1034,6 +1112,30 @@ io.on('connection', (socket) => {
     socket.emit('accept_error', { message: 'Internal error accepting job.' });
   }
 });
+
+  // 5a. Update Job Status (arrived, started)
+  socket.on('update_job_status', async (data) => {
+    const { requestId, status } = data;
+    const request = activeRequests.get(requestId);
+    if (!request) return;
+
+    if (!['accepted', 'arrived', 'started'].includes(status)) return;
+
+    try {
+      await RescueRequest.updateOne({ requestId }, { status: status });
+      request.status = status;
+      console.log(`[Job Status Updated] Request ID: ${requestId} -> ${status}`);
+
+      // Broadcast update to customer
+      io.to(`customer_${request.customerEmail}`).emit('job_status_updated', { requestId, status });
+      // Broadcast update to mechanic
+      if (request.mechanicSocketId) {
+        io.to(request.mechanicSocketId).emit('job_status_updated', { requestId, status });
+      }
+    } catch (err) {
+      console.error('[Socket] Failed to update job status in database:', err.message);
+    }
+  });
 
   // 6. Complete Job
   socket.on('complete_job', async (data) => {

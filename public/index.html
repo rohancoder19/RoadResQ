@@ -532,27 +532,23 @@
               </div>
             </div>
 
-            <!-- Ola/Uber Drive Simulation Controls -->
-            <div class="p-4 bg-orange-50/50 border border-brand-orange/20 rounded-xl flex flex-col gap-2 shadow-sm">
-              <div class="flex items-center gap-1.5">
-                <span class="w-1.5 h-1.5 rounded-full bg-brand-orange animate-pulse"></span>
-                <span class="text-[9px] text-brand-orange font-bold uppercase tracking-wider block">Ola/Uber Drive Simulator</span>
+            <!-- Turn-by-turn Routing Panel -->
+            <div id="route-directions-panel" class="hidden p-3 bg-slate-50 border border-slate-200 rounded-xl flex flex-col gap-2">
+              <div class="flex items-center gap-1.5 border-b border-slate-200 pb-1.5">
+                <i data-lucide="navigation" class="w-3.5 h-3.5 text-brand-orange"></i>
+                <span class="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Turn-by-Turn Navigation</span>
               </div>
-              <div class="flex items-center justify-between mt-1">
-                <span class="text-[10px] text-slate-500 font-semibold" id="simulation-status">Simulation idle</span>
-                <button type="button" onclick="toggleDriveSimulation()" id="btn-simulation-toggle" class="px-3 py-1.5 bg-brand-navy hover:bg-brand-navyHover text-white text-[10px] font-bold rounded-lg transition active:scale-95 shadow-sm">
-                  Start Simulation
-                </button>
+              <div id="route-directions-list" class="max-h-[120px] overflow-y-auto flex flex-col gap-1.5 text-[10px] text-slate-600 font-medium pr-1">
+                <!-- Injected directions list -->
               </div>
-              <p class="text-[8px] text-slate-400 leading-normal mt-1">Simulates real-time road driving by calculating the route and moving your marker step-by-step to the customer.</p>
             </div>
 
             <!-- Action buttons -->
             <div class="flex flex-col gap-2 mt-auto">
-              <button onclick="completeActiveJob()" class="w-full py-3 bg-brand-orange hover:bg-brand-orangeHover text-white font-bold rounded-xl text-xs uppercase tracking-wider transition orange-glow active:scale-95">
+              <button id="active-job-action-btn" class="w-full py-3 bg-brand-orange hover:bg-brand-orangeHover text-white font-bold rounded-xl text-xs uppercase tracking-wider transition orange-glow active:scale-95">
                 Mark Job Completed
               </button>
-              <button onclick="cancelActiveJob()" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-600 font-bold rounded-xl text-xs uppercase tracking-wider transition">
+              <button id="active-job-cancel-btn" onclick="cancelActiveJob()" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-600 font-bold rounded-xl text-xs uppercase tracking-wider transition">
                 Cancel Operations
               </button>
             </div>
@@ -727,6 +723,7 @@
     let otherMarker = null;
     let mapRouteLine = null;
     let directionsService = null;
+    let gpsWatcherId = null;
     
     // Track other mechanics' markers on the Customer's map
     let customerMechanicMarkers = new Map(); // socketId -> HTMLMarker
@@ -1546,6 +1543,65 @@
       );
     }
 
+    function startGPSTracking() {
+      if (gpsWatcherId) return;
+
+      if (!navigator.geolocation) {
+        showToast('GPS tracking is not supported by your browser', 'error');
+        return;
+      }
+
+      showToast('Activating real-time GPS tracking...', 'info');
+
+      gpsWatcherId = navigator.geolocation.watchPosition(
+        (position) => {
+          const newLoc = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          };
+
+          // Check if first location or moved more than ~3 meters (0.003 km)
+          let hasMoved = !myLocation;
+          if (myLocation) {
+            const dist = getDistanceClient(myLocation.lat, myLocation.lng, newLoc.lat, newLoc.lng);
+            if (dist > 0.003) {
+              hasMoved = true;
+            }
+          }
+
+          if (hasMoved) {
+            myLocation = newLoc;
+            updateMyLocationMarker();
+            updateGPSStatusDisplays();
+
+            if (socket && socket.connected) {
+              socket.emit('update_location', myLocation);
+            }
+
+            recalculateRouteAndDistance();
+          }
+        },
+        (error) => {
+          console.warn("GPS watch position error:", error.message);
+          let errorMsg = "GPS access denied. Please enable device location settings.";
+          if (error.code === error.TIMEOUT) {
+            errorMsg = "GPS request timed out. Retrying...";
+          }
+          showToast(errorMsg, 'error');
+          updateGPSStatusDisplays();
+        },
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      );
+    }
+
+    function stopGPSTracking() {
+      if (gpsWatcherId) {
+        navigator.geolocation.clearWatch(gpsWatcherId);
+        gpsWatcherId = null;
+        showToast('Real-time GPS tracking stopped.', 'info');
+      }
+    }
+
     function updateGPSStatusDisplays() {
       const gpsDot = document.getElementById('gps-status-dot');
       const gpsText = document.getElementById('gps-status-text');
@@ -1674,10 +1730,38 @@
       }
     }
 
+    function formatOSRMStep(step) {
+      const type = step.maneuver.type;
+      const modifier = step.maneuver.modifier || '';
+      const name = step.name || 'unnamed road';
+      const dist = step.distance;
+
+      let text = '';
+      if (type === 'depart') {
+        text = `Depart on ${name}`;
+      } else if (type === 'arrive') {
+        text = `Arrive at destination`;
+      } else if (type === 'turn') {
+        text = `Turn ${modifier} onto ${name}`;
+      } else if (type === 'merge') {
+        text = `Merge onto ${name}`;
+      } else {
+        text = `Continue onto ${name}`;
+      }
+
+      if (dist >= 1000) {
+        text += ` (${(dist / 1000).toFixed(1)} km)`;
+      } else if (dist > 0) {
+        text += ` (${Math.round(dist)} m)`;
+      }
+
+      return text;
+    }
+
     function drawRouteLine(start, end) {
       if (!map || !start || !end) return;
 
-      const url = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`;
+      const url = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson&steps=true`;
 
       fetch(url)
         .then(res => res.json())
@@ -1720,6 +1804,34 @@
             }
 
             updateLiveRouteDetails(distanceText, durationText);
+
+            // Turn-by-turn Panel Update for Mechanic
+            if (currentRole === 'mechanic') {
+              const panel = document.getElementById('route-directions-panel');
+              const list = document.getElementById('route-directions-list');
+              if (panel && list) {
+                panel.classList.remove('hidden');
+                list.innerHTML = '';
+
+                const steps = route.legs[0].steps || [];
+                steps.forEach(step => {
+                  const item = document.createElement('div');
+                  item.className = 'py-1 border-b border-slate-100 last:border-0 flex items-start gap-1.5';
+                  
+                  let icon = '⚫';
+                  const type = step.maneuver.type;
+                  const mod = step.maneuver.modifier || '';
+                  if (type === 'arrive') icon = '🏁';
+                  else if (mod.includes('left')) icon = '👈';
+                  else if (mod.includes('right')) icon = '👉';
+                  else icon = '⬆️';
+
+                  const text = formatOSRMStep(step);
+                  item.innerHTML = `<span class="text-xs">${icon}</span> <span class="leading-normal">${text}</span>`;
+                  list.appendChild(item);
+                });
+              }
+            }
           } else {
             console.warn("OSRM routing returned invalid code, falling back to straight line.");
             drawStraightRouteLine(start, end);
@@ -2090,7 +2202,7 @@
         playNotificationSound();
         showToast('Roadside emergency rescue completed successfully!', 'success');
         
-        stopDriveSimulation();
+        stopGPSTracking();
         activeAssistanceRequest = null;
         
         if (currentRole === 'customer') {
@@ -2106,6 +2218,48 @@
         }
 
         updateMapMarkers();
+      });
+
+      // Mechanic/Customer: Job Status Updated (arrived, started)
+      socket.on('job_status_updated', (data) => {
+        if (activeAssistanceRequest && activeAssistanceRequest.id === data.requestId) {
+          activeAssistanceRequest.status = data.status;
+          
+          if (currentRole === 'customer') {
+            // Update customer tracking step indicators
+            if (data.status === 'arrived') {
+              showToast('Your responder has arrived at your location!', 'success');
+              document.getElementById('tracking-status-title').innerText = "Mechanic Arrived";
+              document.getElementById('tracking-status-desc').innerText = `${activeAssistanceRequest.mechanicName} has reached your breakdown location.`;
+              
+              const step3Ind = document.getElementById('step3-indicator');
+              if (step3Ind) {
+                step3Ind.className = "absolute -left-[30px] top-0 w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center text-[8px] text-white";
+                step3Ind.innerHTML = "✓";
+              }
+              const step3Title = document.getElementById('step3-title');
+              if (step3Title) step3Title.className = "text-emerald-600 font-bold";
+              const step3Desc = document.getElementById('step3-desc');
+              if (step3Desc) step3Desc.innerText = "Mechanic has arrived!";
+
+              const matchedMechStatus = document.getElementById('matched-mech-status');
+              if (matchedMechStatus) {
+                matchedMechStatus.innerText = "Arrived";
+                matchedMechStatus.className = "px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 border border-emerald-200 text-[8px] font-bold uppercase";
+              }
+            } else if (data.status === 'started') {
+              showToast('Rescue operations have begun!', 'info');
+              document.getElementById('tracking-status-title').innerText = "Rescue In Progress";
+              document.getElementById('tracking-status-desc').innerText = `${activeAssistanceRequest.mechanicName} is working to resolve your breakdown issue.`;
+              
+              const step3Desc = document.getElementById('step3-desc');
+              if (step3Desc) step3Desc.innerText = "Repair works currently in progress...";
+            }
+          } else {
+            // Update mechanic UI buttons
+            updateActiveJobButtons();
+          }
+        }
       });
 
       // Customer session recovery
@@ -2184,6 +2338,8 @@
         document.getElementById('active-job-vehicle').innerText = job.vehicleType;
         document.getElementById('active-job-desc').innerText = job.description;
         
+        startGPSTracking();
+        updateActiveJobButtons();
         recalculateRouteAndDistance();
         updateMapMarkers();
         lucide.createIcons();
@@ -2209,7 +2365,7 @@
         playNotificationSound();
         showToast('The customer cancelled the assistance request.', 'warning');
         
-        stopDriveSimulation();
+        stopGPSTracking();
         activeAssistanceRequest = null;
  
         document.getElementById('mech-active-job-container').classList.add('hidden');
@@ -2294,6 +2450,8 @@
         document.getElementById('active-job-vehicle').innerText = job.vehicleType;
         document.getElementById('active-job-desc').innerText = job.description;
         
+        startGPSTracking();
+        updateActiveJobButtons();
         const dist = myLocation ? getDistanceClient(myLocation.lat, myLocation.lng, job.location.lat, job.location.lng) : 0;
         document.getElementById('active-job-distance').innerText = `${dist.toFixed(2)} km`;
 
@@ -2310,7 +2468,7 @@
       
       socket.on('disconnect', () => {
         console.warn("Socket disconnected.");
-        stopDriveSimulation();
+        stopGPSTracking();
       });
     }
 
@@ -2521,7 +2679,7 @@
     }
 
     function completeActiveJob() {
-      stopDriveSimulation();
+      stopGPSTracking();
       if (activeAssistanceRequest) {
         socket.emit('complete_job', { requestId: activeAssistanceRequest.id });
       }
@@ -2530,149 +2688,40 @@
     function cancelActiveJob() {
       if (activeAssistanceRequest) {
         if (confirm("Are you sure you want to cancel this operations?")) {
-          stopDriveSimulation();
+          stopGPSTracking();
           socket.emit('cancel_job', { requestId: activeAssistanceRequest.id });
         }
       }
     }
 
-    // drive simulation variables
-    let driveSimulationInterval = null;
-    let driveSimulationPoints = [];
-    let driveSimulationIndex = 0;
-
-    function toggleDriveSimulation() {
-      const btn = document.getElementById('btn-simulation-toggle');
-      const statusText = document.getElementById('simulation-status');
-      if (!btn || !statusText) return;
-
-      if (driveSimulationInterval) {
-        stopDriveSimulation();
-        statusText.innerText = "Simulation stopped";
-      } else {
-        if (!activeAssistanceRequest) {
-          showToast("No active operations to simulate.", "warning");
-          return;
-        }
-
-        const start = myLocation;
-        const end = activeAssistanceRequest.location;
-
-        if (!start || !end) {
-          showToast("Missing location details for simulation.", "warning");
-          return;
-        }
-
-        statusText.innerText = "Calculating road route (OSRM)...";
-        btn.innerText = "Stop";
-        btn.className = "px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-[10px] font-bold rounded-lg transition active:scale-95 shadow-sm";
-
-        const url = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`;
-
-        fetch(url)
-          .then(res => res.json())
-          .then(data => {
-            if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
-              const route = data.routes[0];
-              const coords = route.geometry.coordinates;
-              
-              // OSRM coordinates are in [lng, lat], map to {lat, lng}
-              driveSimulationPoints = coords.map(c => ({ lat: c[1], lng: c[0] }));
-
-              if (driveSimulationPoints.length === 0) {
-                statusText.innerText = "No route points found";
-                stopDriveSimulation();
-                return;
-              }
-
-              driveSimulationIndex = 0;
-              statusText.innerText = `Driving... (0/${driveSimulationPoints.length})`;
-              
-              driveSimulationInterval = setInterval(() => {
-                if (driveSimulationIndex >= driveSimulationPoints.length) {
-                  statusText.innerText = "Arrived!";
-                  stopDriveSimulation();
-                  return;
-                }
-
-                const nextLoc = driveSimulationPoints[driveSimulationIndex];
-                myLocation = nextLoc;
-                driveSimulationIndex++;
-
-                statusText.innerText = `Driving... (${driveSimulationIndex}/${driveSimulationPoints.length})`;
-
-                updateMyLocationMarker();
-
-                if (socket && socket.connected) {
-                  socket.emit('update_location', myLocation);
-                }
-
-                recalculateRouteAndDistance();
-              }, 1200);
-
-            } else {
-              statusText.innerText = "Routing failed, using fallback straight path";
-              startFallbackSimulation(start, end, statusText);
-            }
-          })
-          .catch(err => {
-            console.error("OSRM simulation routing failed:", err);
-            statusText.innerText = "Routing failed, using fallback straight path";
-            startFallbackSimulation(start, end, statusText);
-          });
+    function updateJobStatus(newStatus) {
+      if (activeAssistanceRequest) {
+        socket.emit('update_job_status', { requestId: activeAssistanceRequest.id, status: newStatus });
       }
     }
 
-    function startFallbackSimulation(start, end, statusText) {
-      driveSimulationPoints = [];
-      const steps = 15;
-      for (let i = 0; i <= steps; i++) {
-        const factor = i / steps;
-        driveSimulationPoints.push({
-          lat: start.lat + (end.lat - start.lat) * factor,
-          lng: start.lng + (end.lng - start.lng) * factor
-        });
-      }
+    function updateActiveJobButtons() {
+      const btn = document.getElementById('active-job-action-btn');
+      if (!btn || !activeAssistanceRequest) return;
 
-      driveSimulationIndex = 0;
-      driveSimulationInterval = setInterval(() => {
-        if (driveSimulationIndex >= driveSimulationPoints.length) {
-          statusText.innerText = "Arrived!";
-          stopDriveSimulation();
-          return;
-        }
+      const status = activeAssistanceRequest.status;
 
-        const nextLoc = driveSimulationPoints[driveSimulationIndex];
-        myLocation = nextLoc;
-        driveSimulationIndex++;
-
-        statusText.innerText = `Driving... (${driveSimulationIndex}/${driveSimulationPoints.length})`;
-
-        updateMyLocationMarker();
-
-        if (socket && socket.connected) {
-          socket.emit('update_location', myLocation);
-        }
-
-        recalculateRouteAndDistance();
-      }, 1200);
-    }
-
-    function stopDriveSimulation() {
-      if (driveSimulationInterval) {
-        clearInterval(driveSimulationInterval);
-        driveSimulationInterval = null;
-      }
-      const btn = document.getElementById('btn-simulation-toggle');
-      const statusText = document.getElementById('simulation-status');
-      if (btn) {
-        btn.innerText = "Start Simulation";
-        btn.className = "px-3 py-1.5 bg-brand-navy hover:bg-brand-navyHover text-white text-[10px] font-bold rounded-lg transition active:scale-95 shadow-sm";
-      }
-      if (statusText && statusText.innerText.includes("Driving")) {
-        statusText.innerText = "Simulation idle";
+      if (status === 'accepted') {
+        btn.innerText = "Mark Arrived";
+        btn.className = "w-full py-3 bg-brand-navy hover:bg-brand-navyHover text-white font-bold rounded-xl text-xs uppercase tracking-wider transition active:scale-95";
+        btn.onclick = () => updateJobStatus('arrived');
+      } else if (status === 'arrived') {
+        btn.innerText = "Start Rescue Work";
+        btn.className = "w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition active:scale-95";
+        btn.onclick = () => updateJobStatus('started');
+      } else if (status === 'started') {
+        btn.innerText = "Complete Rescue";
+        btn.className = "w-full py-3 bg-brand-orange hover:bg-brand-orangeHover text-white font-bold rounded-xl text-xs uppercase tracking-wider transition orange-glow active:scale-95";
+        btn.onclick = () => completeActiveJob();
       }
     }
+
+
 
     // Toast System (Light Mode Styling)
     function showToast(message, type = 'info') {
