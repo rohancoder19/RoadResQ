@@ -406,7 +406,7 @@ function deg2rad(deg) {
 function getNearbyMechanics(location, radiusKm = 50) {
   const nearbyMechs = [];
   onlineMechanics.forEach((mech) => {
-    if (mech.status === 'available' && mech.location) {
+    if ((mech.status === 'available' || mech.status === 'busy') && mech.location) {
       const distance = getDistance(location.lat, location.lng, mech.location.lat, mech.location.lng);
       if (distance !== null && distance <= radiusKm) {
         nearbyMechs.push({
@@ -435,6 +435,22 @@ function broadcastOnlineMechanics() {
       }
     }
   });
+}
+
+// Helper: Send latest available jobs to a specific mechanic socket
+function sendAvailableJobsToSocket(socket, mechanic) {
+  if (!socket || !mechanic) return;
+  const pendingJobs = [];
+  activeRequests.forEach((req, id) => {
+    if (req.status === 'pending') {
+      let distance = null;
+      if (mechanic.location && req.location) {
+        distance = getDistance(mechanic.location.lat, mechanic.location.lng, req.location.lat, req.location.lng);
+      }
+      pendingJobs.push({ ...req, distance });
+    }
+  });
+  socket.emit('available_jobs', pendingJobs);
 }
 
 // ========================================================
@@ -766,7 +782,7 @@ io.on('connection', (socket) => {
       email: normalizedEmail,
       role: role || 'customer',
       phone: phone,
-      location: null
+      location: data.location || null
     };
     connectedUsers.set(socket.id, user);
     console.log(`[Socket Registered] ${user.name} (${user.role}) joined.`);
@@ -784,7 +800,7 @@ io.on('connection', (socket) => {
         name: user.name,
         email: user.email,
         phone: user.phone,
-        location: null,
+        location: user.location,
         status: 'offline' // 'offline', 'available', 'busy'
       });
     }
@@ -877,6 +893,9 @@ io.on('connection', (socket) => {
           // If accepted, notify the mechanic of the customer's moving location
           if (req.status === 'accepted' && req.mechanicSocketId) {
             io.to(req.mechanicSocketId).emit('customer_location_updated', location);
+          } else if (req.status === 'pending') {
+            // Broadcast location update to all available mechanics
+            io.to("mechanics_room").emit('pending_job_location_updated', { requestId: reqId, location });
           }
           break;
         }
@@ -922,17 +941,7 @@ io.on('connection', (socket) => {
 
     // If mechanic just went online, send them all currently pending requests
     if (mechanic.status === 'available') {
-      const pendingJobs = [];
-      activeRequests.forEach((req, id) => {
-        if (req.status === 'pending') {
-          let distance = null;
-          if (mechanic.location && req.location) {
-            distance = getDistance(mechanic.location.lat, mechanic.location.lng, req.location.lat, req.location.lng);
-          }
-          pendingJobs.push({ ...req, distance });
-        }
-      });
-      socket.emit('available_jobs', pendingJobs);
+      sendAvailableJobsToSocket(socket, mechanic);
     }
   });
 
@@ -1085,6 +1094,7 @@ io.on('connection', (socket) => {
           const mechSocket = io.sockets.sockets.get(request.mechanicSocketId);
           if (mechSocket) {
             mechSocket.join("mechanics_room");
+            sendAvailableJobsToSocket(mechSocket, mechanic);
           }
         }
       }
@@ -1108,8 +1118,11 @@ io.on('connection', (socket) => {
     const request = activeRequests.get(requestId);
     if (!request) return;
 
-    const requestOwner = request.customerSocketId === socket.id;
-    const requestAssignedMech = request.mechanicSocketId === socket.id;
+    const user = connectedUsers.get(socket.id);
+    const userEmail = user ? user.email : '';
+
+    const requestOwner = request.customerSocketId === socket.id || (userEmail && request.customerEmail === userEmail);
+    const requestAssignedMech = request.mechanicSocketId === socket.id || (userEmail && request.mechanicEmail === userEmail);
 
     console.log(`[Job Cancelled] Request ID: ${requestId} by ${requestOwner ? 'Customer' : 'Mechanic'}`);
 
@@ -1130,6 +1143,7 @@ io.on('connection', (socket) => {
             const mechSocket = io.sockets.sockets.get(request.mechanicSocketId);
             if (mechSocket) {
               mechSocket.join("mechanics_room");
+              sendAvailableJobsToSocket(mechSocket, mechanic);
             }
           }
         }
@@ -1165,6 +1179,7 @@ io.on('connection', (socket) => {
           mechanic.status = 'available';
           socket.join("mechanics_room"); // Rejoin availability room
           socket.emit('job_cancelled_ack', { requestId });
+          sendAvailableJobsToSocket(socket, mechanic);
         }
 
         // Notify customer that mechanic cancelled, request is back to searching

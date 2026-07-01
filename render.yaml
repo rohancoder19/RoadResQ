@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: roadresq-app
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+        placeholder: "Your Gemini API Key"
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+        placeholder: "Your Google Maps API Key"
+      - key: MONGODB_URI
+        sync: false
+        placeholder: "Your MongoDB connection string"
+      - key: SMTP_HOST
+        sync: false
+        placeholder: "Optional: SMTP Host"
+      - key: SMTP_PORT
+        sync: false
+        placeholder: "Optional: SMTP Port"
+      - key: SMTP_SECURE
+        sync: false
+        placeholder: "Optional: true or false"
+      - key: SMTP_USER
+        sync: false
+        placeholder: "Optional: SMTP User"
+      - key: SMTP_PASS
+        sync: false
+        placeholder: "Optional: SMTP Password"

@@ -829,6 +829,7 @@
           if (this.dragCallback) {
             let isDragging = false;
             
+            // Mouse Drag Handlers
             const moveHandler = (e) => {
               const proj = this.getProjection();
               const mapDiv = this.getMap().getDiv();
@@ -868,6 +869,49 @@
               window.addEventListener('mouseup', upHandler);
               e.stopPropagation();
               e.preventDefault();
+            });
+
+            // Touch Drag Handlers (Mobile Support)
+            const touchMoveHandler = (e) => {
+              if (e.touches.length === 0) return;
+              const touch = e.touches[0];
+              const proj = this.getProjection();
+              if (!proj) return;
+              const mapDiv = this.getMap().getDiv();
+              const rect = mapDiv.getBoundingClientRect();
+              const x = touch.clientX - rect.left;
+              const y = touch.clientY - rect.top;
+              
+              const latlng = proj.fromContainerPixelToLatLng(new google.maps.Point(x, y));
+              if (latlng) {
+                this.latlng = latlng;
+                this.draw();
+              }
+              e.preventDefault(); // Prevent page scrolling during drag
+            };
+
+            const touchEndHandler = () => {
+              isDragging = false;
+              this.getMap().setOptions({ draggable: true });
+              
+              window.removeEventListener('touchmove', touchMoveHandler, { passive: false });
+              window.removeEventListener('touchend', touchEndHandler);
+              
+              if (this.dragCallback) {
+                this.dragCallback({
+                  lat: this.latlng.lat(),
+                  lng: this.latlng.lng()
+                });
+              }
+            };
+
+            this.div.addEventListener('touchstart', (e) => {
+              isDragging = true;
+              this.getMap().setOptions({ draggable: false });
+              
+              window.addEventListener('touchmove', touchMoveHandler, { passive: false });
+              window.addEventListener('touchend', touchEndHandler);
+              e.stopPropagation();
             });
           }
         }
@@ -1432,6 +1476,8 @@
           socket.emit('update_location', myLocation);
           if (currentRole === 'customer') {
             socket.emit('get_nearby_mechanics', myLocation);
+          } else if (currentRole === 'mechanic') {
+            renderJobsList();
           }
         }
       });
@@ -1468,6 +1514,8 @@
             socket.emit('update_location', myLocation);
             if (currentRole === 'customer') {
               socket.emit('get_nearby_mechanics', myLocation);
+            } else if (currentRole === 'mechanic') {
+              renderJobsList();
             }
           }
 
@@ -1477,6 +1525,10 @@
           console.warn("GPS acquire error:", error.message);
           showToast('GPS access denied. Tap map to select location manually.', 'info');
           updateGPSStatusDisplays();
+          
+          if (window.innerWidth < 1024) {
+            switchMobileTab('map');
+          }
         },
         { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
       );
@@ -1731,7 +1783,11 @@
         console.log("Socket Connected: ", socket.id);
         socketId = socket.id;
 
-        socket.emit('register_user', { name: userName, role: currentRole, email: userEmail });
+        socket.emit('register_user', { name: userName, role: currentRole, email: userEmail, location: myLocation });
+      });
+
+      socket.on('register_success', (data) => {
+        console.log("Register complete.");
 
         if (myLocation) {
           socket.emit('update_location', myLocation);
@@ -1744,10 +1800,6 @@
             socket.emit('toggle_mechanic_status', { isOnline: toggle.checked });
           }
         }
-      });
-
-      socket.on('register_success', (data) => {
-        console.log("Register complete.");
       });
 
       // Customer receives list updates of online mechanics
@@ -1798,6 +1850,14 @@
           }
           return m.status === 'available' || m.status === 'busy';
         });
+
+        // Sort onlineMechs by distance (closest first)
+        onlineMechs.sort((a, b) => {
+          const distA = (a.distance !== undefined && a.distance !== null) ? a.distance : (myLocation && a.location ? getDistanceClient(myLocation.lat, myLocation.lng, a.location.lat, a.location.lng) : 999999);
+          const distB = (b.distance !== undefined && b.distance !== null) ? b.distance : (myLocation && b.location ? getDistanceClient(myLocation.lat, myLocation.lng, b.location.lat, b.location.lng) : 999999);
+          return distA - distB;
+        });
+
         badge.innerText = `${onlineMechs.length} Online`;
 
         if (onlineMechs.length === 0) {
@@ -2001,6 +2061,12 @@
         lucide.createIcons();
       });
 
+      // Customer: Request created successfully (save request ID)
+      socket.on('request_created', (data) => {
+        console.log("[Request Created] ID:", data.id);
+        activeAssistanceRequest = data;
+      });
+
       // Mechanic session recovery
       socket.on('active_job_restored', (job) => {
         console.log("[Session Recovery] Restoring active job:", job);
@@ -2056,7 +2122,7 @@
 
       // Mechanic: Individual incoming request (Urgent Modal Popup)
       socket.on('new_breakdown_request', (job) => {
-        playNotificationSound();
+        playEmergencyAlertSound();
         
         // Add job to the dashboard list so it appears in the queue
         const exists = availableJobs.find(j => j.id === job.id);
@@ -2101,6 +2167,17 @@
         renderJobsList();
       });
 
+      // Mechanic: Pending job updated location
+      socket.on('pending_job_location_updated', (data) => {
+        if (currentRole === 'mechanic') {
+          const job = availableJobs.find(j => j.id === data.requestId);
+          if (job) {
+            job.location = data.location;
+            renderJobsList();
+          }
+        }
+      });
+
       // Mechanic: Confirms job successfully assigned to me
       socket.on('job_assigned', (job) => {
         showToast('Rescue operation assigned to you! Drive safely.', 'success');
@@ -2138,6 +2215,7 @@
       modal.classList.add('hidden');
       modal.classList.remove('flex');
       pendingAlertRequest = null;
+      stopEmergencyAlertSound();
     }
 
     function declineAlertJob() {
@@ -2258,6 +2336,7 @@
         
         availableJobs = [];
         renderJobsList();
+        stopEmergencyAlertSound();
       }
 
       socket.emit('toggle_mechanic_status', { isOnline: isMechanicOnline });
@@ -2286,11 +2365,11 @@
         card.className = "job-card p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col gap-3 transition hover:border-slate-350 animate-zoomIn shadow-sm";
         
         let distDisplay = "Unavailable";
-        if (job.distance !== null && job.distance !== undefined) {
-          distDisplay = `${job.distance} km`;
-        } else if (myLocation && job.location) {
+        if (myLocation && job.location) {
           const clientDist = getDistanceClient(myLocation.lat, myLocation.lng, job.location.lat, job.location.lng);
           distDisplay = `${clientDist.toFixed(2)} km`;
+        } else if (job.distance !== null && job.distance !== undefined) {
+          distDisplay = `${job.distance} km`;
         }
 
         card.innerHTML = `
@@ -2398,6 +2477,66 @@
           toast.remove();
         }, 300);
       }, 4500);
+    let emergencyAlertAudioInterval = null;
+    let emergencyAlertAudioContext = null;
+    let emergencyAlertOscillator = null;
+
+    function playEmergencyAlertSound() {
+      try {
+        stopEmergencyAlertSound();
+
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return;
+        
+        const audioCtx = new AudioContextClass();
+        emergencyAlertAudioContext = audioCtx;
+
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+        gainNode.gain.setValueAtTime(0.12, audioCtx.currentTime);
+
+        osc.start(audioCtx.currentTime);
+        emergencyAlertOscillator = osc;
+
+        let high = true;
+        emergencyAlertAudioInterval = setInterval(() => {
+          if (!emergencyAlertAudioContext || emergencyAlertAudioContext.state === 'closed') {
+            clearInterval(emergencyAlertAudioInterval);
+            return;
+          }
+          const targetFreq = high ? 900 : 600;
+          osc.frequency.exponentialRampToValueAtTime(targetFreq, audioCtx.currentTime + 0.45);
+          high = !high;
+        }, 500);
+
+      } catch (e) {
+        console.warn("Emergency alert sound blocked or failed:", e.message);
+      }
+    }
+
+    function stopEmergencyAlertSound() {
+      if (emergencyAlertAudioInterval) {
+        clearInterval(emergencyAlertAudioInterval);
+        emergencyAlertAudioInterval = null;
+      }
+      if (emergencyAlertOscillator) {
+        try {
+          emergencyAlertOscillator.stop();
+        } catch (e) {}
+        emergencyAlertOscillator = null;
+      }
+      if (emergencyAlertAudioContext) {
+        try {
+          emergencyAlertAudioContext.close();
+        } catch (e) {}
+        emergencyAlertAudioContext = null;
+      }
     }
 
     function playNotificationSound() {
