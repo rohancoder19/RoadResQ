@@ -274,6 +274,7 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true },
   phone: { type: String, required: true },
   role: { type: String, required: true, enum: ['customer', 'mechanic'] },
+  isVerified: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -313,9 +314,14 @@ async function seedMockAccounts() {
         email: 'customer@resq.com',
         password: 'password123',
         phone: '+1 (555) 019-2834',
-        role: 'customer'
+        role: 'customer',
+        isVerified: true
       });
       console.log('[DB] Seeded Alice Customer mock account.');
+    } else if (!customerExists.isVerified) {
+      customerExists.isVerified = true;
+      await customerExists.save();
+      console.log('[DB] Updated Alice Customer mock account to verified.');
     }
     const mechanicExists = await User.findOne({ email: 'mechanic@resq.com' });
     if (!mechanicExists) {
@@ -324,9 +330,14 @@ async function seedMockAccounts() {
         email: 'mechanic@resq.com',
         password: 'password123',
         phone: '+1 (555) 014-9988',
-        role: 'mechanic'
+        role: 'mechanic',
+        isVerified: true
       });
       console.log('[DB] Seeded Bob Mechanic mock account.');
+    } else if (!mechanicExists.isVerified) {
+      mechanicExists.isVerified = true;
+      await mechanicExists.save();
+      console.log('[DB] Updated Bob Mechanic mock account to verified.');
     }
   } catch (err) {
     console.error('[DB] Seeding mock accounts failed:', err.message);
@@ -495,6 +506,16 @@ app.post('/api/login', async (req, res) => {
 
     console.log(`[Login Attempt] Credentials verified for Name: ${user.name}, Email: ${user.email}`);
 
+    // One-Time OTP Verification: Bypass if already verified
+    if (user.isVerified) {
+      console.log(`[Login Direct] User already verified. Bypassing OTP for ${user.email}`);
+      return res.json({
+        status: 'success',
+        message: 'Login successful!',
+        user: { name: user.name, email: user.email, role: user.role, phone: user.phone }
+      });
+    }
+
     // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
@@ -568,6 +589,13 @@ app.post('/api/verify-otp', async (req, res) => {
     const user = await User.findOne({ email: normalizedEmail });
     if (!user) {
       return res.status(404).json({ error: 'User account not found.' });
+    }
+
+    // Mark the user as verified on successful first-time OTP verification
+    if (!user.isVerified) {
+      user.isVerified = true;
+      await user.save();
+      console.log(`[User Verified] Marked ${user.email} as verified in database.`);
     }
 
     // Remove the OTP from cache
