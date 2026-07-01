@@ -24,17 +24,22 @@ let mailTransporter = null;
 
 // Initialize mail transporter
 async function initMailTransporter() {
-  if (process.env.SMTP_HOST) {
+  if (process.env.SMTP_SERVICE || process.env.SMTP_HOST) {
     console.log('[Email] Configuring SMTP Transporter with environment variables...');
-    mailTransporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: process.env.SMTP_SECURE === 'true',
+    const transportConfig = {
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS
       }
-    });
+    };
+    if (process.env.SMTP_SERVICE) {
+      transportConfig.service = process.env.SMTP_SERVICE;
+    } else {
+      transportConfig.host = process.env.SMTP_HOST;
+      transportConfig.port = parseInt(process.env.SMTP_PORT || '587');
+      transportConfig.secure = process.env.SMTP_SECURE === 'true';
+    }
+    mailTransporter = nodemailer.createTransport(transportConfig);
   } else {
     console.log('[Email] No SMTP environment variables found. Attempting Ethereal Mail setup...');
     try {
