@@ -1677,18 +1677,15 @@
     function drawRouteLine(start, end) {
       if (!map || !start || !end) return;
 
-      if (typeof google !== 'undefined' && google.maps && google.maps.DirectionsService) {
-        if (!directionsService) {
-          directionsService = new google.maps.DirectionsService();
-        }
-        directionsService.route({
-          origin: new google.maps.LatLng(start.lat, start.lng),
-          destination: new google.maps.LatLng(end.lat, end.lng),
-          travelMode: google.maps.TravelMode.DRIVING
-        }, (response, status) => {
-          if (status === google.maps.DirectionsStatus.OK) {
-            const route = response.routes[0];
-            const pathPoints = route.overview_path;
+      const url = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`;
+
+      fetch(url)
+        .then(res => res.json())
+        .then(data => {
+          if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+            const route = data.routes[0];
+            const coords = route.geometry.coordinates;
+            const pathPoints = coords.map(c => new google.maps.LatLng(c[1], c[0]));
 
             if (mapRouteLine) {
               mapRouteLine.setPath(pathPoints);
@@ -1712,16 +1709,26 @@
             pathPoints.forEach(pt => bounds.extend(pt));
             map.fitBounds(bounds);
 
-            const leg = route.legs[0];
-            updateLiveRouteDetails(leg.distance.text, leg.duration.text);
-            return;
+            const distance = route.legs[0].distance / 1000;
+            const durationSec = route.legs[0].duration;
+            const distanceText = `${distance.toFixed(2)} km`;
+            let durationText = '';
+            if (durationSec < 60) {
+              durationText = '1 min';
+            } else {
+              durationText = `${Math.round(durationSec / 60)} mins`;
+            }
+
+            updateLiveRouteDetails(distanceText, durationText);
+          } else {
+            console.warn("OSRM routing returned invalid code, falling back to straight line.");
+            drawStraightRouteLine(start, end);
           }
-          // Fallback if status is not OK
+        })
+        .catch(err => {
+          console.error("OSRM routing request failed, falling back to straight line:", err);
           drawStraightRouteLine(start, end);
         });
-      } else {
-        drawStraightRouteLine(start, end);
-      }
     }
 
     function drawStraightRouteLine(start, end) {
@@ -2556,25 +2563,21 @@
           return;
         }
 
-        statusText.innerText = "Calculating route...";
+        statusText.innerText = "Calculating road route (OSRM)...";
         btn.innerText = "Stop";
         btn.className = "px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-[10px] font-bold rounded-lg transition active:scale-95 shadow-sm";
 
-        if (typeof google !== 'undefined' && google.maps && google.maps.DirectionsService) {
-          const ds = new google.maps.DirectionsService();
-          ds.route({
-            origin: new google.maps.LatLng(start.lat, start.lng),
-            destination: new google.maps.LatLng(end.lat, end.lng),
-            travelMode: google.maps.TravelMode.DRIVING
-          }, (response, status) => {
-            if (status === google.maps.DirectionsStatus.OK) {
-              const route = response.routes[0];
-              driveSimulationPoints = [];
-              route.legs[0].steps.forEach(step => {
-                step.path.forEach(latLng => {
-                  driveSimulationPoints.push({ lat: latLng.lat(), lng: latLng.lng() });
-                });
-              });
+        const url = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`;
+
+        fetch(url)
+          .then(res => res.json())
+          .then(data => {
+            if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+              const route = data.routes[0];
+              const coords = route.geometry.coordinates;
+              
+              // OSRM coordinates are in [lng, lat], map to {lat, lng}
+              driveSimulationPoints = coords.map(c => ({ lat: c[1], lng: c[0] }));
 
               if (driveSimulationPoints.length === 0) {
                 statusText.innerText = "No route points found";
@@ -2611,11 +2614,12 @@
               statusText.innerText = "Routing failed, using fallback straight path";
               startFallbackSimulation(start, end, statusText);
             }
+          })
+          .catch(err => {
+            console.error("OSRM simulation routing failed:", err);
+            statusText.innerText = "Routing failed, using fallback straight path";
+            startFallbackSimulation(start, end, statusText);
           });
-        } else {
-          statusText.innerText = "Google API not available, using fallback straight path";
-          startFallbackSimulation(start, end, statusText);
-        }
       }
     }
 
