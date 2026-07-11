@@ -605,7 +605,19 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password credentials.' });
     }
     
-    const isMatch = await bcrypt.compare(password, user.password);
+    let isMatch = false;
+    if (user.password.startsWith('$2')) {
+      isMatch = await bcrypt.compare(password, user.password);
+    } else {
+      isMatch = (user.password === password);
+      if (isMatch) {
+        // Automatically upgrade legacy plain text password to a secure hash
+        user.password = await bcrypt.hash(password, 10);
+        await user.save();
+        console.log(`[DB Migration] Hashed plain-text password for existing user: ${user.email}`);
+      }
+    }
+
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid email or password credentials.' });
     }
