@@ -1191,18 +1191,18 @@
 
     function clearAllMapMarkers() {
       if (myMarker) {
-        myMarker.setMap(null);
+        myMarker.remove();
         myMarker = null;
       }
       if (otherMarker) {
-        otherMarker.setMap(null);
+        otherMarker.remove();
         otherMarker = null;
       }
       if (mapRouteLine) {
-        mapRouteLine.setMap(null);
+        mapRouteLine.remove();
         mapRouteLine = null;
       }
-      customerMechanicMarkers.forEach(m => m.setMap(null));
+      customerMechanicMarkers.forEach(m => m.remove());
       customerMechanicMarkers.clear();
     }
 
