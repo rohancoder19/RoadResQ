@@ -37,6 +37,10 @@
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
 
+  <!-- Leaflet CSS & JS for OpenStreetMap -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
   <style>
     body {
       background-color: #f8fafc;
@@ -803,150 +807,10 @@
       {
         featureType: "administrative",
         elementType: "geometry.fill",
-        stylers: [{ color: "#fefefe" }, { lightness: 20 }]
-      },
-      {
-        featureType: "administrative",
-        elementType: "geometry.stroke",
-        stylers: [{ color: "#fefefe" }, { lightness: 17 }, { weight: 1.2 }]
-      }
-    ];
-
-    // Custom HTML Marker Overlay Class
-    let HTMLMarker;
-
-    function defineHTMLMarkerClass() {
-      HTMLMarker = class extends google.maps.OverlayView {
-        constructor(latlng, map, html, dragCallback) {
-          super();
-          this.latlng = new google.maps.LatLng(latlng.lat, latlng.lng);
-          this.html = html;
-          this.dragCallback = dragCallback;
-          this.div = null;
-          this.setMap(map);
-        }
-        
-        onAdd() {
-          this.div = document.createElement('div');
-          this.div.style.position = 'absolute';
-          this.div.style.cursor = this.dragCallback ? 'grab' : 'default';
-          this.div.innerHTML = this.html;
-          
-          const panes = this.getPanes();
-          panes.overlayMouseTarget.appendChild(this.div);
-          
-          if (this.dragCallback) {
-            let isDragging = false;
-            
-            // Mouse Drag Handlers
-            const moveHandler = (e) => {
-              const proj = this.getProjection();
-              const mapDiv = this.getMap().getDiv();
-              const rect = mapDiv.getBoundingClientRect();
-              const x = e.clientX - rect.left;
-              const y = e.clientY - rect.top;
-              
-              const latlng = proj.fromContainerPixelToLatLng(new google.maps.Point(x, y));
-              if (latlng) {
-                this.latlng = latlng;
-                this.draw();
-              }
-            };
-
-            const upHandler = () => {
-              isDragging = false;
-              this.div.style.cursor = 'grab';
-              this.getMap().setOptions({ draggable: true });
-              
-              window.removeEventListener('mousemove', moveHandler);
-              window.removeEventListener('mouseup', upHandler);
-              
-              if (this.dragCallback) {
-                this.dragCallback({
-                  lat: this.latlng.lat(),
-                  lng: this.latlng.lng()
-                });
-              }
-            };
-
-            this.div.addEventListener('mousedown', (e) => {
-              isDragging = true;
-              this.div.style.cursor = 'grabbing';
-              this.getMap().setOptions({ draggable: false });
-              
-              window.addEventListener('mousemove', moveHandler);
-              window.addEventListener('mouseup', upHandler);
-              e.stopPropagation();
-              e.preventDefault();
-            });
-
-            // Touch Drag Handlers (Mobile Support)
-            const touchMoveHandler = (e) => {
-              if (e.touches.length === 0) return;
-              const touch = e.touches[0];
-              const proj = this.getProjection();
-              if (!proj) return;
-              const mapDiv = this.getMap().getDiv();
-              const rect = mapDiv.getBoundingClientRect();
-              const x = touch.clientX - rect.left;
-              const y = touch.clientY - rect.top;
-              
-              const latlng = proj.fromContainerPixelToLatLng(new google.maps.Point(x, y));
-              if (latlng) {
-                this.latlng = latlng;
-                this.draw();
-              }
-              e.preventDefault(); // Prevent page scrolling during drag
-            };
-
-            const touchEndHandler = () => {
-              isDragging = false;
-              this.getMap().setOptions({ draggable: true });
-              
-              window.removeEventListener('touchmove', touchMoveHandler, { passive: false });
-              window.removeEventListener('touchend', touchEndHandler);
-              
-              if (this.dragCallback) {
-                this.dragCallback({
-                  lat: this.latlng.lat(),
-                  lng: this.latlng.lng()
-                });
-              }
-            };
-
-            this.div.addEventListener('touchstart', (e) => {
-              isDragging = true;
-              this.getMap().setOptions({ draggable: false });
-              
-              window.addEventListener('touchmove', touchMoveHandler, { passive: false });
-              window.addEventListener('touchend', touchEndHandler);
-              e.stopPropagation();
-            });
-          }
-        }
-        
-        draw() {
-          if (!this.div) return;
-          const proj = this.getProjection();
-          if (!proj) return;
-          const pos = proj.fromLatLngToDivPixel(this.latlng);
-          this.div.style.left = (pos.x - 18) + 'px';
-          this.div.style.top = (pos.y - 18) + 'px';
-        }
-        
-        onRemove() {
-          if (this.div) {
-            this.div.parentNode.removeChild(this.div);
-            this.div = null;
-          }
-        }
-        
-        setLatLng(latlng) {
-          this.latlng = new google.maps.LatLng(latlng.lat, latlng.lng);
-          this.draw();
-        }
-      };
-    }
+    
+    // HTMLMarker is no longer needed since we use Leaflet's native L.marker and L.divIcon
+    let HTMLMarker = null;
+    function defineHTMLMarkerClass() {}
 
     // OTP Input Listeners for Auto-Focus Chaining
     function setupOTPInputListeners() {
@@ -1051,45 +915,9 @@
       }
     });
 
-    // Dynamic Google Maps Script Loader
+    // Mock Loader since we load Leaflet globally
     function loadGoogleMapsScript(callback) {
-      const oldScript = document.getElementById('gmaps-api-script');
-      if (oldScript) {
-        oldScript.remove();
-      }
-
-      window.onGoogleMapsLoaded = () => {
-        defineHTMLMarkerClass();
-        callback();
-      };
-
-      // Fetch the API key from backend dynamically
-      fetch('/api/config')
-        .then(res => res.json())
-        .then(config => {
-          const key = config.googleMapsApiKey || GOOGLE_MAPS_API_KEY;
-          const script = document.createElement('script');
-          script.id = 'gmaps-api-script';
-          script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&callback=onGoogleMapsLoaded`;
-          script.async = true;
-          script.defer = true;
-          script.onerror = () => {
-            showToast('Google Maps API failed to load.', 'error');
-          };
-          document.head.appendChild(script);
-        })
-        .catch(err => {
-          console.error('Failed to fetch Google Maps API key:', err);
-          const script = document.createElement('script');
-          script.id = 'gmaps-api-script';
-          script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&callback=onGoogleMapsLoaded`;
-          script.async = true;
-          script.defer = true;
-          script.onerror = () => {
-            showToast('Google Maps API failed to load.', 'error');
-          };
-          document.head.appendChild(script);
-        });
+      callback();
     }
 
     // Initialize Map and Socket
@@ -1479,25 +1307,28 @@
     }
 
     // Geolocation and Google Maps Setup (Light Styling)
+    // Geolocation and Leaflet Setup (OpenStreetMap)
     function initMap() {
       const defaultLat = 51.505;
       const defaultLng = -0.09;
       
       myLocation = { lat: defaultLat, lng: defaultLng };
 
-      const mapOptions = {
-        zoom: 13,
-        center: new google.maps.LatLng(defaultLat, defaultLng),
-        disableDefaultUI: true,
+      // Initialize Leaflet Map
+      map = L.map('map', {
         zoomControl: true,
-        styles: lightMapStyle
-      };
+        attributionControl: true
+      }).setView([defaultLat, defaultLng], 13);
 
-      map = new google.maps.Map(document.getElementById('map'), mapOptions);
+      // Add OpenStreetMap tile layer
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+      }).addTo(map);
 
       // Handle map clicks to manually specify coordinates/simulate
-      map.addListener('click', (e) => {
-        myLocation = { lat: e.latLng.lat(), lng: e.latLng.lng() };
+      map.on('click', (e) => {
+        myLocation = { lat: e.latlng.lat, lng: e.latlng.lng };
         
         updateMyLocationMarker();
         updateGPSStatusDisplays();
@@ -1533,8 +1364,7 @@
           };
 
           if (map) {
-            map.setCenter(new google.maps.LatLng(myLocation.lat, myLocation.lng));
-            map.setZoom(14);
+            map.setView([myLocation.lat, myLocation.lng], 14);
           }
           
           updateMyLocationMarker();
@@ -1655,7 +1485,7 @@
       }
     }
 
-    // Marker styling and updating (High contrast pins)
+    // Marker styling and updating (Leaflet markers)
     function updateMyLocationMarker() {
       if (!map || !myLocation) return;
 
@@ -1670,11 +1500,25 @@
              <span class="relative inline-flex rounded-full h-7 w-7 bg-orange-500 border border-white shadow-lg flex items-center justify-center text-xs text-white">🛠️</span>
            </div>`;
 
+      const customIcon = L.divIcon({
+        html: html,
+        className: 'custom-leaflet-marker',
+        iconSize: currentRole === 'customer' ? [32, 32] : [36, 36],
+        iconAnchor: currentRole === 'customer' ? [16, 16] : [18, 18]
+      });
+
       if (myMarker) {
-        myMarker.setLatLng(myLocation);
+        myMarker.setLatLng([myLocation.lat, myLocation.lng]);
+        myMarker.setIcon(customIcon);
       } else {
-        myMarker = new HTMLMarker(myLocation, map, html, (newLatLng) => {
-          myLocation = newLatLng;
+        myMarker = L.marker([myLocation.lat, myLocation.lng], {
+          icon: customIcon,
+          draggable: true
+        }).addTo(map);
+
+        myMarker.on('dragend', (e) => {
+          const position = myMarker.getLatLng();
+          myLocation = { lat: position.lat, lng: position.lng };
           updateGPSStatusDisplays();
           
           if (socket && socket.connected) {
@@ -1691,15 +1535,15 @@
     // Refresh display of markers on role switch or state changes
     function updateMapMarkers() {
       if (otherMarker) {
-        otherMarker.setMap(null);
+        otherMarker.remove();
         otherMarker = null;
       }
       if (mapRouteLine) {
-        mapRouteLine.setMap(null);
+        mapRouteLine.remove();
         mapRouteLine = null;
       }
       if (myMarker) {
-        myMarker.setMap(null);
+        myMarker.remove();
         myMarker = null;
       }
 
@@ -1707,7 +1551,7 @@
 
       // Clear general online mechanics pins if not customer mode
       if (currentRole !== 'customer') {
-        customerMechanicMarkers.forEach(m => m.setMap(null));
+        customerMechanicMarkers.forEach(m => m.remove());
         customerMechanicMarkers.clear();
       }
 
@@ -1733,7 +1577,6 @@
     function updateOtherMarker(role, location) {
       if (!map || !location) return;
 
-      // Customer matched seeing Mechanic (Wrench pin), Mechanic seeing Customer (blue dot)
       const html = role === 'customer' 
         ? `<div class="relative flex items-center justify-center w-8 h-8">
              <span class="absolute inline-flex h-8 w-8 animate-ping rounded-full bg-blue-500 opacity-75"></span>
@@ -1744,10 +1587,20 @@
              <span class="relative inline-flex rounded-full h-7 w-7 bg-orange-500 border border-white shadow-lg flex items-center justify-center text-xs text-white">🛠️</span>
            </div>`;
 
+      const customIcon = L.divIcon({
+        html: html,
+        className: 'custom-leaflet-marker',
+        iconSize: role === 'customer' ? [32, 32] : [36, 36],
+        iconAnchor: role === 'customer' ? [16, 16] : [18, 18]
+      });
+
       if (otherMarker) {
-        otherMarker.setLatLng(location);
+        otherMarker.setLatLng([location.lat, location.lng]);
+        otherMarker.setIcon(customIcon);
       } else {
-        otherMarker = new HTMLMarker(location, map, html, null);
+        otherMarker = L.marker([location.lat, location.lng], {
+          icon: customIcon
+        }).addTo(map);
       }
     }
 
@@ -1790,28 +1643,25 @@
           if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
             const route = data.routes[0];
             const coords = route.geometry.coordinates;
-            const pathPoints = coords.map(c => new google.maps.LatLng(c[1], c[0]));
+            const pathPoints = coords.map(c => [c[1], c[0]]);
 
             if (mapRouteLine) {
-              mapRouteLine.setPath(pathPoints);
-              mapRouteLine.setOptions({
-                strokeColor: '#3b82f6', // Uber-like blue line
-                strokeOpacity: 0.85,
-                strokeWeight: 6,
-                icons: []
+              mapRouteLine.setLatLngs(pathPoints);
+              mapRouteLine.setStyle({
+                color: '#3b82f6',
+                opacity: 0.85,
+                weight: 6,
+                dashArray: null
               });
             } else {
-              mapRouteLine = new google.maps.Polyline({
-                path: pathPoints,
-                strokeColor: '#3b82f6',
-                strokeOpacity: 0.85,
-                strokeWeight: 6,
-                map: map
-              });
+              mapRouteLine = L.polyline(pathPoints, {
+                color: '#3b82f6',
+                opacity: 0.85,
+                weight: 6
+              }).addTo(map);
             }
 
-            const bounds = new google.maps.LatLngBounds();
-            pathPoints.forEach(pt => bounds.extend(pt));
+            const bounds = L.latLngBounds(pathPoints);
             map.fitBounds(bounds);
 
             const distance = route.legs[0].distance / 1000;
@@ -1865,44 +1715,29 @@
     }
 
     function drawStraightRouteLine(start, end) {
-      const startLatLng = new google.maps.LatLng(start.lat, start.lng);
-      const endLatLng = new google.maps.LatLng(end.lat, end.lng);
-      const pathPoints = [startLatLng, endLatLng];
-
-      const lineSymbol = {
-        path: 'M 0,-1 0,1',
-        strokeOpacity: 1,
-        scale: 4
-      };
+      const pathPoints = [
+        [start.lat, start.lng],
+        [end.lat, end.lng]
+      ];
 
       if (mapRouteLine) {
-        mapRouteLine.setPath(pathPoints);
-        mapRouteLine.setOptions({
-          strokeColor: '#f97316',
-          strokeOpacity: 0,
-          icons: [{
-            icon: lineSymbol,
-            offset: '0',
-            repeat: '15px'
-          }]
+        mapRouteLine.setLatLngs(pathPoints);
+        mapRouteLine.setStyle({
+          color: '#f97316',
+          opacity: 0.8,
+          weight: 4,
+          dashArray: '5, 10'
         });
       } else {
-        mapRouteLine = new google.maps.Polyline({
-          path: pathPoints,
-          strokeColor: '#f97316',
-          strokeOpacity: 0,
-          icons: [{
-            icon: lineSymbol,
-            offset: '0',
-            repeat: '15px'
-          }],
-          map: map
-        });
+        mapRouteLine = L.polyline(pathPoints, {
+          color: '#f97316',
+          opacity: 0.8,
+          weight: 4,
+          dashArray: '5, 10'
+        }).addTo(map);
       }
 
-      const bounds = new google.maps.LatLngBounds();
-      bounds.extend(startLatLng);
-      bounds.extend(endLatLng);
+      const bounds = L.latLngBounds(pathPoints);
       map.fitBounds(bounds);
     }
 
@@ -2044,7 +1879,7 @@
         customerMechanicMarkers.forEach((marker, mechSocketId) => {
           const match = mechanics.find(m => m.socketId === mechSocketId);
           if (!match || (activeAssistanceRequest && activeAssistanceRequest.mechanicSocketId === mechSocketId)) {
-            marker.setMap(null);
+            marker.remove();
             customerMechanicMarkers.delete(mechSocketId);
           }
         });
@@ -2060,14 +1895,22 @@
                           </div>`;
 
             if (customerMechanicMarkers.has(mech.socketId)) {
-              customerMechanicMarkers.get(mech.socketId).setLatLng(mech.location);
+              customerMechanicMarkers.get(mech.socketId).setLatLng([mech.location.lat, mech.location.lng]);
             } else {
-              const marker = new HTMLMarker(mech.location, map, html, null);
+              const customIcon = L.divIcon({
+                html: html,
+                className: 'custom-leaflet-marker',
+                iconSize: [32, 32],
+                iconAnchor: [16, 16]
+              });
+              const marker = L.marker([mech.location.lat, mech.location.lng], {
+                icon: customIcon
+              }).addTo(map);
               customerMechanicMarkers.set(mech.socketId, marker);
             }
           } else {
             if (customerMechanicMarkers.has(mech.socketId)) {
-              customerMechanicMarkers.get(mech.socketId).setMap(null);
+              customerMechanicMarkers.get(mech.socketId).remove();
               customerMechanicMarkers.delete(mech.socketId);
             }
           }
@@ -2689,8 +2532,7 @@
 
     function viewJobLocation(lat, lng) {
       if (map) {
-        map.setCenter(new google.maps.LatLng(lat, lng));
-        map.setZoom(15);
+        map.setView([lat, lng], 15);
         showToast('Viewing request coordinates on map', 'info');
       }
     }
@@ -2939,9 +2781,9 @@
           mapCol.classList.add('block');
         }
         if (map) {
-          google.maps.event.trigger(map, 'resize');
+          map.invalidateSize();
           if (myLocation) {
-            map.setCenter(myLocation);
+            map.setView([myLocation.lat, myLocation.lng]);
           }
         }
       } else if (tab === 'chatbot') {
