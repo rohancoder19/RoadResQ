@@ -395,10 +395,14 @@ async function seedMockAccounts() {
         isVerified: true
       });
       console.log('[DB] Seeded Alice Customer mock account.');
-    } else if (!customerExists.isVerified) {
-      customerExists.isVerified = true;
-      await customerExists.save();
-      console.log('[DB] Updated Alice Customer mock account to verified.');
+    } else {
+      // If the password is not hashed (plain text), hash it
+      if (!customerExists.password.startsWith('$2')) {
+        customerExists.password = hashedPassword;
+        customerExists.isVerified = true;
+        await customerExists.save();
+        console.log('[DB] Updated Alice Customer password to secure hash.');
+      }
     }
     const mechanicExists = await User.findOne({ email: 'mechanic@resq.com' });
     if (!mechanicExists) {
@@ -411,10 +415,14 @@ async function seedMockAccounts() {
         isVerified: true
       });
       console.log('[DB] Seeded Bob Mechanic mock account.');
-    } else if (!mechanicExists.isVerified) {
-      mechanicExists.isVerified = true;
-      await mechanicExists.save();
-      console.log('[DB] Updated Bob Mechanic mock account to verified.');
+    } else {
+      // If the password is not hashed (plain text), hash it
+      if (!mechanicExists.password.startsWith('$2')) {
+        mechanicExists.password = hashedPassword;
+        mechanicExists.isVerified = true;
+        await mechanicExists.save();
+        console.log('[DB] Updated Bob Mechanic password to secure hash.');
+      }
     }
   } catch (err) {
     console.error('[DB] Seeding mock accounts failed:', err.message);
