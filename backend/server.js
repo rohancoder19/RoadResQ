@@ -5,7 +5,9 @@ const { Server } = require('socket.io');
 const path = require('path');
 const nodemailer = require('nodemailer');
 const mongoose = require('mongoose');
-
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const cors = require('cors');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -251,8 +253,11 @@ async function sendMail({ to, subject, html, text }) {
 // Enable JSON body parsing for REST routes
 app.use(express.json());
 
-// Serve static files from 'public' directory
-app.use(express.static(path.join(__dirname, 'public')));
+// Enable CORS for frontend
+app.use(cors());
+
+// Health check endpoint
+app.get('/', (req, res) => res.json({ status: 'RoadResQ API is running' }));
 
 // Connect to MongoDB
 const RAW_MONGODB_URI = (process.env.MONGODB_URI || '').trim() || 'mongodb://127.0.0.1:27017/RoadResQ';
@@ -374,12 +379,14 @@ const RescueRequest = mongoose.model('RescueRequest', rescueRequestSchema);
 // Seeding Mock Accounts
 async function seedMockAccounts() {
   try {
+    const hashedPassword = await bcrypt.hash('password123', 10);
+    
     const customerExists = await User.findOne({ email: 'customer@resq.com' });
     if (!customerExists) {
       await User.create({
         name: 'Alice Customer',
         email: 'customer@resq.com',
-        password: 'password123',
+        password: hashedPassword,
         phone: '+1 (555) 019-2834',
         role: 'customer',
         isVerified: true
@@ -395,7 +402,7 @@ async function seedMockAccounts() {
       await User.create({
         name: 'Bob Mechanic',
         email: 'mechanic@resq.com',
-        password: 'password123',
+        password: hashedPassword,
         phone: '+1 (555) 014-9988',
         role: 'mechanic',
         isVerified: true
@@ -542,7 +549,7 @@ app.post('/api/register', async (req, res) => {
     const newUser = new User({
       name: name.trim(),
       email: normalizedEmail,
-      password, // Stored as plain text for simple prototype
+      password: await bcrypt.hash(password, 10), // Stored securely using bcrypt
       role,
       phone: phone.trim()
     });
@@ -583,7 +590,12 @@ app.post('/api/login', async (req, res) => {
     await connectToDatabase();
     const user = await User.findOne({ email: normalizedEmail });
 
-    if (!user || user.password !== password) {
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid email or password credentials.' });
+    }
+    
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
       return res.status(401).json({ error: 'Invalid email or password credentials.' });
     }
 
@@ -595,9 +607,17 @@ app.post('/api/login', async (req, res) => {
       await user.save();
     }
 
+    // Generate JWT token valid for 20 minutes
+    const token = jwt.sign(
+      { id: user._id, email: user.email, role: user.role },
+      process.env.JWT_SECRET || 'fallback_secret_key_123',
+      { expiresIn: '20m' }
+    );
+
     return res.json({
       status: 'success',
       message: 'Login successful!',
+      token: token,
       user: { name: user.name, email: user.email, role: user.role, phone: user.phone }
     });
   } catch (err) {
@@ -650,8 +670,16 @@ app.post('/api/verify-otp', async (req, res) => {
 
     console.log(`[OTP Verified] Successful login for: ${user.name} (${user.email})`);
 
+    // Generate JWT token valid for 20 minutes
+    const token = jwt.sign(
+      { id: user._id, email: user.email, role: user.role },
+      process.env.JWT_SECRET || 'fallback_secret_key_123',
+      { expiresIn: '20m' }
+    );
+
     return res.json({
       message: 'OTP verification successful!',
+      token: token,
       user: { name: user.name, email: user.email, role: user.role, phone: user.phone }
     });
   } catch (err) {

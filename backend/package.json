@@ -8,14 +8,17 @@
     "dev": "node server.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^4.19.2",
     "firebase-admin": "^12.0.0",
+    "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.7.3",
     "nodemailer": "^9.0.1",
     "socket.io": "^4.7.5",
-    "socket.io-client": "^4.8.3",
-    "@supabase/supabase-js": "^2.39.0"
+    "socket.io-client": "^4.8.3"
   },
   "private": true
 }
