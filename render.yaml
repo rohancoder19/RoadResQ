@@ -2,6 +2,7 @@ services:
   - type: web
     name: roadresq-app
     env: node
+    rootDir: backend
     plan: free
     buildCommand: npm install
     startCommand: npm start

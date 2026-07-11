@@ -256,8 +256,11 @@ app.use(express.json());
 // Enable CORS for frontend
 app.use(cors());
 
+// Serve static files from 'frontend/public' directory
+app.use(express.static(path.join(__dirname, '../frontend/public')));
+
 // Health check endpoint
-app.get('/', (req, res) => res.json({ status: 'RoadResQ API is running' }));
+app.get('/api/health', (req, res) => res.json({ status: 'RoadResQ API is running' }));
 
 // Connect to MongoDB
 const RAW_MONGODB_URI = (process.env.MONGODB_URI || '').trim() || 'mongodb://127.0.0.1:27017/RoadResQ';
