@@ -828,19 +828,10 @@
       
       const session = localStorage.getItem('roadresq_session');
       const token = localStorage.getItem('roadresq_token');
-      const loginTime = localStorage.getItem('roadresq_login_time');
       
       let isSessionValid = false;
-      if (session && token && loginTime) {
-        const timeElapsed = Date.now() - parseInt(loginTime, 10);
-        if (timeElapsed < 20 * 60 * 1000) { // 20 minutes
-          isSessionValid = true;
-        } else {
-          // Token expired
-          localStorage.removeItem('roadresq_session');
-          localStorage.removeItem('roadresq_token');
-          localStorage.removeItem('roadresq_login_time');
-        }
+      if (session && token) {
+        isSessionValid = true;
       }
 
       if (isSessionValid) {
