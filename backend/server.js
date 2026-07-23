@@ -483,7 +483,7 @@ function deg2rad(deg) {
 }
 
 // Helper: Get nearby mechanics for a specific location
-function getNearbyMechanics(location, radiusKm = 50) {
+function getNearbyMechanics(location, radiusKm = 50000) {
   const nearbyMechs = [];
   onlineMechanics.forEach((mech) => {
     if ((mech.status === 'available' || mech.status === 'busy') && mech.location) {
@@ -889,8 +889,9 @@ io.on('connection', (socket) => {
         email: user.email,
         phone: user.phone,
         location: user.location,
-        status: 'offline' // 'offline', 'available', 'busy'
+        status: 'available' // Default to available
       });
+      socket.join("mechanics_room");
     }
 
     socket.emit('register_success', { socketId: socket.id });

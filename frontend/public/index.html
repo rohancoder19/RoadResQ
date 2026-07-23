@@ -467,15 +467,14 @@
               Acquire GPS Location
             </button>
           </div>
-
-          <!-- Availability Toggle (Glows green when active) -->
+        <!-- Availability Toggle (Glows green when active) -->
           <div class="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-200">
             <div>
               <p class="text-xs font-bold text-slate-800">Online Availability</p>
               <p class="text-[10px] text-slate-400 font-semibold" id="mechanic-status-desc">Status: OFFLINE</p>
             </div>
             <label class="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" id="availability-toggle" onchange="toggleMechanicStatus()" class="sr-only peer" disabled>
+              <input type="checkbox" id="availability-toggle" onchange="toggleMechanicStatus()" class="sr-only peer" checked disabled>
               <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 shadow-inner"></div>
             </label>
           </div>
@@ -734,7 +733,7 @@
 
     // Socket Registered Info
     let socketId = null;
-    let isMechanicOnline = false;
+    let isMechanicOnline = true;
     let activeAssistanceRequest = null;
     let availableJobs = [];
     let pendingAlertRequest = null; // Hold currently alerting job
