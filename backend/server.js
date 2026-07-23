@@ -548,13 +548,24 @@ app.post('/api/register', async (req, res) => {
   const normalizedEmail = email.trim().toLowerCase();
   try {
     await connectToDatabase();
-    const existingUser = await User.findOne({ email: normalizedEmail });
-    if (existingUser) {
-      return res.status(400).json({ error: 'An account with this email already exists.' });
-    }
+    let existingUser = await User.findOne({ email: normalizedEmail });
 
     if (role !== 'customer' && role !== 'mechanic') {
       return res.status(400).json({ error: 'Invalid user role selected.' });
+    }
+
+    if (existingUser) {
+      existingUser.name = name.trim();
+      existingUser.password = await bcrypt.hash(password, 10);
+      existingUser.role = role;
+      existingUser.phone = phone.trim();
+      await existingUser.save();
+      console.log(`[User Updated] Name: ${existingUser.name}, Email: ${existingUser.email}, Phone: ${existingUser.phone}, Role: ${existingUser.role}`);
+      
+      return res.status(201).json({
+        message: 'Registration successful!',
+        user: { name: existingUser.name, email: existingUser.email, role: existingUser.role }
+      });
     }
 
     const newUser = new User({
